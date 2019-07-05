@@ -37,31 +37,30 @@ libopenthread_posix_a_CPPFLAGS            = \
     -D_GNU_SOURCE                           \
     $(NULL)
 
-libopenthread_posix_a_SOURCES             = \
+PLATFORM_SOURCES                          = \
     alarm.c                                 \
-    misc.c                                  \
-    logging.c                               \
-    platform.c                              \
-    radio.c                                 \
-    random.c                                \
-    uart-posix.c                            \
-    flash.c                                 \
-    $(NULL)
-
-if OPENTHREAD_ENABLE_DIAG
-libopenthread_posix_a_SOURCES            += \
     diag.c                                  \
-    $(NULL)
-endif
-
-if OPENTHREAD_ENABLE_NCP_SPI
-libopenthread_posix_a_SOURCES            += \
-    spi-stubs.c                             \
-    $(NULL)
-endif
-
-noinst_HEADERS                            = \
+    entropy.c                               \
+    flash.c                                 \
+    logging.c                               \
+    misc.c                                  \
+    openthread-core-posix-config.h          \
     platform-posix.h                        \
+    radio.c                                 \
+    spi-stubs.c                             \
+    system.c                                \
+    uart-posix.c                            \
+    sim/alarm-sim.c                         \
+    sim/platform-sim.c                      \
+    sim/radio-sim.c                         \
+    $(NULL)
+
+libopenthread_posix_a_SOURCES             = \
+    $(PLATFORM_SOURCES)                     \
+    $(NULL)
+
+PRETTY_FILES                              = \
+    $(PLATFORM_SOURCES)                     \
     $(NULL)
 
 Dash                                      = -
@@ -69,6 +68,10 @@ libopenthread_posix_a_LIBADD              = \
     $(shell find $(top_builddir)/examples/platforms/utils $(Dash)type f $(Dash)name "*.o")
 
 if OPENTHREAD_BUILD_COVERAGE
+libopenthread_posix_a_CPPFLAGS           += \
+    -DOPENTHREAD_ENABLE_COVERAGE            \
+    $(NULL)
+
 CLEANFILES                                = $(wildcard *.gcda *.gcno)
 endif # OPENTHREAD_BUILD_COVERAGE
 

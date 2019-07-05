@@ -31,80 +31,77 @@
  *   This file implements the Announce Begin Client.
  */
 
-#define WPP_NAME "announce_begin_client.tmh"
+#include "announce_begin_client.hpp"
 
-#ifdef OPENTHREAD_CONFIG_FILE
-#include OPENTHREAD_CONFIG_FILE
-#else
-#include <openthread-config.h>
-#endif
+#include "coap/coap_message.hpp"
+#include "common/code_utils.hpp"
+#include "common/debug.hpp"
+#include "common/instance.hpp"
+#include "common/locator-getters.hpp"
+#include "common/logging.hpp"
+#include "meshcop/meshcop.hpp"
+#include "meshcop/meshcop_tlvs.hpp"
+#include "thread/thread_netif.hpp"
+#include "thread/thread_uri_paths.hpp"
 
-#include <coap/coap_header.hpp>
-#include <common/code_utils.hpp>
-#include <common/debug.hpp>
-#include <common/logging.hpp>
-#include <platform/random.h>
-#include <meshcop/announce_begin_client.hpp>
-#include <meshcop/tlvs.hpp>
-#include <thread/thread_netif.hpp>
-#include <thread/thread_uris.hpp>
+#if OPENTHREAD_ENABLE_COMMISSIONER && OPENTHREAD_FTD
 
-namespace Thread {
+namespace ot {
 
-AnnounceBeginClient::AnnounceBeginClient(ThreadNetif &aThreadNetif) :
-    mNetif(aThreadNetif),
-    mCoapClient(aThreadNetif.GetCoapClient())
+AnnounceBeginClient::AnnounceBeginClient(Instance &aInstance)
+    : InstanceLocator(aInstance)
 {
 }
 
-ThreadError AnnounceBeginClient::SendRequest(uint32_t aChannelMask, uint8_t aCount, uint16_t aPeriod,
-                                             const Ip6::Address &aAddress)
+otError AnnounceBeginClient::SendRequest(uint32_t            aChannelMask,
+                                         uint8_t             aCount,
+                                         uint16_t            aPeriod,
+                                         const Ip6::Address &aAddress)
 {
-    ThreadError error = kThreadError_None;
-    Coap::Header header;
+    otError                           error = OT_ERROR_NONE;
     MeshCoP::CommissionerSessionIdTlv sessionId;
-    MeshCoP::ChannelMask0Tlv channelMask;
-    MeshCoP::CountTlv count;
-    MeshCoP::PeriodTlv period;
+    MeshCoP::ChannelMaskTlv           channelMask;
+    MeshCoP::CountTlv                 count;
+    MeshCoP::PeriodTlv                period;
 
     Ip6::MessageInfo messageInfo;
-    Message *message;
+    Coap::Message *  message = NULL;
 
-    header.Init(aAddress.IsMulticast() ? kCoapTypeNonConfirmable : kCoapTypeConfirmable,
-                kCoapRequestPost);
-    header.SetToken(Coap::Header::kDefaultTokenLength);
-    header.AppendUriPathOptions(OPENTHREAD_URI_ANNOUNCE_BEGIN);
-    header.SetPayloadMarker();
+    VerifyOrExit(Get<MeshCoP::Commissioner>().IsActive(), error = OT_ERROR_INVALID_STATE);
+    VerifyOrExit((message = MeshCoP::NewMeshCoPMessage(Get<Coap::Coap>())) != NULL, error = OT_ERROR_NO_BUFS);
 
-    VerifyOrExit((message = mCoapClient.NewMessage(header)) != NULL, error = kThreadError_NoBufs);
+    SuccessOrExit(error =
+                      message->Init(aAddress.IsMulticast() ? OT_COAP_TYPE_NON_CONFIRMABLE : OT_COAP_TYPE_CONFIRMABLE,
+                                    OT_COAP_CODE_POST, OT_URI_PATH_ANNOUNCE_BEGIN));
+    SuccessOrExit(error = message->SetPayloadMarker());
 
     sessionId.Init();
-    sessionId.SetCommissionerSessionId(mNetif.GetCommissioner().GetSessionId());
-    SuccessOrExit(error = message->Append(&sessionId, sizeof(sessionId)));
+    sessionId.SetCommissionerSessionId(Get<MeshCoP::Commissioner>().GetSessionId());
+    SuccessOrExit(error = message->AppendTlv(sessionId));
 
     channelMask.Init();
-    channelMask.SetMask(aChannelMask);
-    SuccessOrExit(error = message->Append(&channelMask, sizeof(channelMask)));
+    channelMask.SetChannelMask(aChannelMask);
+    SuccessOrExit(error = message->AppendTlv(channelMask));
 
     count.Init();
     count.SetCount(aCount);
-    SuccessOrExit(error = message->Append(&count, sizeof(count)));
+    SuccessOrExit(error = message->AppendTlv(count));
 
     period.Init();
     period.SetPeriod(aPeriod);
-    SuccessOrExit(error = message->Append(&period, sizeof(period)));
+    SuccessOrExit(error = message->AppendTlv(period));
 
+    messageInfo.SetSockAddr(Get<Mle::MleRouter>().GetMeshLocal16());
     messageInfo.SetPeerAddr(aAddress);
     messageInfo.SetPeerPort(kCoapUdpPort);
-    messageInfo.SetInterfaceId(mNetif.GetInterfaceId());
 
-    SuccessOrExit(error = mCoapClient.SendMessage(*message, messageInfo));
+    SuccessOrExit(error = Get<Coap::Coap>().SendMessage(*message, messageInfo));
 
     otLogInfoMeshCoP("sent announce begin query");
 
 exit:
 
-    if (error != kThreadError_None && message != NULL)
+    if (error != OT_ERROR_NONE && message != NULL)
     {
         message->Free();
     }
@@ -112,4 +109,6 @@ exit:
     return error;
 }
 
-}  // namespace Thread
+} // namespace ot
+
+#endif // OPENTHREAD_ENABLE_COMMISSIONER && OPENTHREAD_FTD

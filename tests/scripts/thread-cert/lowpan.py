@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -731,6 +731,9 @@ class LowpanIpv6HeaderFactory:
         elif iphc.m == self.IPHC_M_YES:
             return self._decompress_multicast_dst_addr(iphc, dci, data)
 
+    def set_lowpan_context(self, cid, prefix):
+        self._context_manager[cid] = Context(prefix)
+
     def parse(self, data, message_info):
         iphc = LowpanIPHC.from_bytes(bytearray(data.read(2)))
 
@@ -775,6 +778,9 @@ class LowpanDecompressor:
 
     def _is_next_header_compressed(self, header):
         return (header.next_header is None)
+
+    def set_lowpan_context(self, cid, prefix):
+        self._lowpan_ip_header_factory.set_lowpan_context(cid, prefix)
 
     def decompress(self, data, message_info):
         ipv6_header = self._lowpan_ip_header_factory.parse(data, message_info)
@@ -849,7 +855,11 @@ class LowpanMeshHeaderFactory:
         is_short_originator_address = bool(data_byte & 0x20)
         is_short_final_destination_address = bool(data_byte & 0x10)
 
-        hops_left = (data_byte & 0x0f)
+        if (data_byte & 0x0f) != 0x0f:
+            hops_left = (data_byte & 0x0f)
+        else:
+            hops_left = ord(data.read(1))
+
         originator_address = self._parse_address(data, is_short_originator_address)
         final_destination_address = self._parse_address(data, is_short_final_destination_address)
 
@@ -1072,6 +1082,9 @@ class LowpanParser(object):
 
         return self._ipv6_packet_factory.parse(io.BytesIO(decompressed_data), message_info)
 
+    def set_lowpan_context(self, cid, prefix):
+        self._lowpan_decompressor.set_lowpan_context(cid, prefix)
+
     def parse(self, data, message_info):
 
         while data.tell() < len(data.getvalue()):
@@ -1091,3 +1104,7 @@ class LowpanParser(object):
 
             elif self._is_iphc(first_byte):
                 return self._handle_iphc_header(data, message_info)
+
+            else:
+                raise RuntimeError("Unsupported header type: 0x{:02x}".format(first_byte))
+                

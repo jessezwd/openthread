@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -30,6 +30,7 @@
 import time
 import unittest
 
+import config
 import node
 
 LEADER = 1
@@ -38,9 +39,11 @@ ED = 3
 
 class Cert_6_3_1_OrphanReattach(unittest.TestCase):
     def setUp(self):
+        self.simulator = config.create_default_simulator()
+
         self.nodes = {}
         for i in range(1,4):
-            self.nodes[i] = node.Node(i)
+            self.nodes[i] = node.Node(i, (i == ED), simulator=self.simulator)
 
         self.nodes[LEADER].set_panid(0xface)
         self.nodes[LEADER].set_mode('rsdn')
@@ -63,25 +66,26 @@ class Cert_6_3_1_OrphanReattach(unittest.TestCase):
     def tearDown(self):
         for node in list(self.nodes.values()):
             node.stop()
-        del self.nodes
+            node.destroy()
+        self.simulator.stop()
 
     def test(self):
         self.nodes[LEADER].start()
-        self.nodes[LEADER].set_state('leader')
+        self.simulator.go(5)
         self.assertEqual(self.nodes[LEADER].get_state(), 'leader')
 
         self.nodes[ROUTER].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ROUTER].get_state(), 'router')
 
         self.nodes[ED].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ED].get_state(), 'child')
 
         self.nodes[ROUTER].stop()
         self.nodes[LEADER].add_whitelist(self.nodes[ED].get_addr64())
         self.nodes[ED].add_whitelist(self.nodes[LEADER].get_addr64())
-        time.sleep(20)
+        self.simulator.go(20)
 
         self.assertEqual(self.nodes[ED].get_state(), 'child')
 

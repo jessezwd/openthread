@@ -34,9 +34,11 @@
 #ifndef IP6_FILTER_HPP_
 #define IP6_FILTER_HPP_
 
-#include <openthread.h>
+#include "openthread-core-config.h"
 
-namespace Thread {
+#include "common/message.hpp"
+
+namespace ot {
 namespace Ip6 {
 
 /**
@@ -78,22 +80,28 @@ public:
      *
      * @param[in]  aPort  The port value.
      *
-     * @retval kThreadError_None    The port was successfully added to the allowed unsecure port list.
-     * @retval kThreadError_NoBufs  The unsecure port list is full.
+     * @retval OT_ERROR_NONE     The port was successfully added to the allowed unsecure port list.
+     * @retval OT_ERROR_NO_BUFS  The unsecure port list is full.
      *
      */
-    ThreadError AddUnsecurePort(uint16_t aPort);
+    otError AddUnsecurePort(uint16_t aPort);
 
     /**
      * This method removes a port from the allowed unsecure port list.
      *
      * @param[in]  aPort  The port value.
      *
-     * @retval kThreadError_None      The port was successfully removed from the allowed unsecure port list.
-     * @retval kThreadError_NotFound  The port was not found in the unsecure port list.
+     * @retval OT_ERROR_NONE       The port was successfully removed from the allowed unsecure port list.
+     * @retval OT_ERROR_NOT_FOUND  The port was not found in the unsecure port list.
      *
      */
-    ThreadError RemoveUnsecurePort(uint16_t aPort);
+    otError RemoveUnsecurePort(uint16_t aPort);
+
+    /**
+     * This method removes all ports from the allowed unsecure port list.
+     *
+     */
+    void RemoveAllUnsecurePorts(void);
 
     /**
      * This method returns a pointer to the unsecure port list.
@@ -107,15 +115,24 @@ public:
      */
     const uint16_t *GetUnsecurePorts(uint8_t &aNumEntries) const;
 
+    /**
+     * This method sets whether to allow native commissioner traffic.
+     *
+     * @param[in]   aAllow  Whether to allow native commissioner traffic.
+     *
+     */
+    void AllowNativeCommissioner(bool aAllow) { mAllowNativeCommissioner = aAllow; }
+
 private:
     enum
     {
         kMaxUnsecurePorts = 2,
     };
     uint16_t mUnsecurePorts[kMaxUnsecurePorts];
+    bool     mAllowNativeCommissioner;
 };
 
-}  // namespace Ip6
-}  // namespace Thread
+} // namespace Ip6
+} // namespace ot
 
-#endif  // IP6_FILTER_HPP_
+#endif // IP6_FILTER_HPP_

@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -30,6 +30,7 @@
 import time
 import unittest
 
+import config
 import node
 
 LEADER1 = 1
@@ -48,9 +49,11 @@ DATASET2_PANID = 0xafce
 
 class Cert_9_2_12_Announce(unittest.TestCase):
     def setUp(self):
+        self.simulator = config.create_default_simulator()
+
         self.nodes = {}
         for i in range(1,6):
-            self.nodes[i] = node.Node(i)
+            self.nodes[i] = node.Node(i, (i == MED), simulator=self.simulator)
 
         self.nodes[LEADER1].set_active_dataset(DATASET1_TIMESTAMP, channel=DATASET1_CHANNEL, panid=DATASET1_PANID)
         self.nodes[LEADER1].set_mode('rsdn')
@@ -64,21 +67,22 @@ class Cert_9_2_12_Announce(unittest.TestCase):
         self.nodes[ROUTER1].enable_whitelist()
         self.nodes[ROUTER1].set_router_selection_jitter(1)
 
-        self.nodes[LEADER2].set_active_dataset(DATASET2_TIMESTAMP, channel=DATASET2_CHANNEL, panid=DATASET1_PANID)
+        self.nodes[LEADER2].set_active_dataset(DATASET2_TIMESTAMP, channel=DATASET2_CHANNEL, panid=DATASET2_PANID)
         self.nodes[LEADER2].set_mode('rsdn')
         self.nodes[LEADER2].add_whitelist(self.nodes[ROUTER1].get_addr64())
         self.nodes[LEADER2].add_whitelist(self.nodes[ROUTER2].get_addr64())
         self.nodes[LEADER2].enable_whitelist()
         self.nodes[LEADER2].set_router_selection_jitter(1)
 
-        self.nodes[ROUTER2].set_active_dataset(DATASET2_TIMESTAMP, channel=DATASET2_CHANNEL, panid=DATASET1_PANID)
+        self.nodes[ROUTER2].set_active_dataset(DATASET2_TIMESTAMP, channel=DATASET2_CHANNEL, panid=DATASET2_PANID)
         self.nodes[ROUTER2].set_mode('rsdn')
         self.nodes[ROUTER2].add_whitelist(self.nodes[LEADER2].get_addr64())
         self.nodes[ROUTER2].add_whitelist(self.nodes[MED].get_addr64())
         self.nodes[ROUTER2].enable_whitelist()
         self.nodes[ROUTER2].set_router_selection_jitter(1)
 
-        self.nodes[MED].set_active_dataset(DATASET2_TIMESTAMP, channel=DATASET2_CHANNEL, panid=DATASET1_PANID)
+        self.nodes[MED].set_channel(DATASET2_CHANNEL)
+        self.nodes[MED].set_panid(DATASET2_PANID)
         self.nodes[MED].set_mode('rsn')
         self.nodes[MED].add_whitelist(self.nodes[ROUTER2].get_addr64())
         self.nodes[MED].enable_whitelist()
@@ -86,15 +90,18 @@ class Cert_9_2_12_Announce(unittest.TestCase):
     def tearDown(self):
         for node in list(self.nodes.values()):
             node.stop()
-        del self.nodes
+            node.destroy()
+        self.simulator.stop()
 
     def test(self):
         self.nodes[LEADER1].start()
-        self.nodes[LEADER1].set_state('leader')
+        self.simulator.go(5)
         self.assertEqual(self.nodes[LEADER1].get_state(), 'leader')
+        self.nodes[LEADER1].commissioner_start()
+        self.simulator.go(3)
 
         self.nodes[ROUTER1].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ROUTER1].get_state(), 'router')
 
         self.nodes[LEADER2].start()
@@ -102,11 +109,11 @@ class Cert_9_2_12_Announce(unittest.TestCase):
         self.assertEqual(self.nodes[LEADER2].get_state(), 'leader')
 
         self.nodes[ROUTER2].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ROUTER2].get_state(), 'router')
 
         self.nodes[MED].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[MED].get_state(), 'child')
 
         ipaddrs = self.nodes[ROUTER1].get_addrs()
@@ -115,7 +122,7 @@ class Cert_9_2_12_Announce(unittest.TestCase):
                 break
 
         self.nodes[LEADER1].announce_begin(0x1000, 1, 1000, ipaddr)
-        time.sleep(30)
+        self.simulator.go(30)
         self.assertEqual(self.nodes[LEADER2].get_state(), 'router')
         self.assertEqual(self.nodes[ROUTER2].get_state(), 'router')
         self.assertEqual(self.nodes[MED].get_state(), 'child')

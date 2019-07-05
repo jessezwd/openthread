@@ -33,18 +33,17 @@
 #ifndef NCP_UART_HPP_
 #define NCP_UART_HPP_
 
-#ifdef OPENTHREAD_CONFIG_FILE
-#include OPENTHREAD_CONFIG_FILE
-#else
-#include <openthread-config.h>
-#endif
+#include "openthread-core-config.h"
 
-#include <ncp/ncp_base.hpp>
-#include <ncp/flen.hpp>
-#include <ncp/hdlc.hpp>
-#include <ncp/ncp_buffer.hpp>
+#include "ncp/hdlc.hpp"
+#include "ncp/ncp_base.hpp"
 
-namespace Thread {
+#if OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER
+#include "spinel_encrypter.hpp"
+#endif // OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER
+
+namespace ot {
+namespace Ncp {
 
 class NcpUart : public NcpBase
 {
@@ -57,56 +56,7 @@ public:
      * @param[in]  aInstance  The OpenThread instance structure.
      *
      */
-    NcpUart(otInstance *aInstance);
-
-    /**
-     * This method is called to start a new outbound frame.
-     *
-     * @retval kThreadError_None      Successfully started a new frame.
-     * @retval kThreadError_NoBufs    Insufficient buffer space available to start a new frame.
-     *
-     */
-    virtual ThreadError OutboundFrameBegin(void);
-
-    /**
-     * This method adds data to the current outbound frame being written.
-     *
-     * If no buffer space is available, this method will discard and clear the frame before returning an error status.
-     *
-     * @param[in]  aDataBuffer        A pointer to data buffer.
-     * @param[in]  aDataBufferLength  The length of the data buffer.
-     *
-     * @retval kThreadError_None      Successfully added new data to the frame.
-     * @retval kThreadError_NoBufs    Insufficient buffer space available to add data.
-     *
-     */
-    virtual ThreadError OutboundFrameFeedData(const uint8_t *aDataBuffer, uint16_t aDataBufferLength);
-
-    /**
-     * This method adds a message to the current outbound frame being written.
-     *
-     * If no buffer space is available, this method will discard and clear the frame before returning an error status.
-     * In case of success, the passed-in message @aMessage will be owned by outbound buffer and will be freed
-     * when either the the frame is successfully sent and removed or if the frame is discarded.
-     *
-     * @param[in]  aMessage         A reference to the message to be added to current frame.
-     *
-     * @retval kThreadError_None    Successfully added the message to the frame.
-     * @retval kThreadError_NoBufs  Insufficient buffer space available to add message.
-     *
-     */
-    virtual ThreadError OutboundFrameFeedMessage(Message &aMessage);
-
-    /**
-     * This method finalizes and sends the current outbound frame.
-     *
-     * If no buffer space is available, this method will discard and clear the frame before returning an error status.
-     *
-     * @retval kThreadError_None    Successfully added the message to the frame.
-     * @retval kThreadError_NoBufs  Insufficient buffer space available to add message.
-     *
-     */
-    virtual ThreadError OutboundFrameEnd(void);
+    explicit NcpUart(Instance *aInstance);
 
     /**
      * This method is called when uart tx is finished. It prepares and sends the next data chunk (if any) to uart.
@@ -121,57 +71,77 @@ public:
     void HandleUartReceiveDone(const uint8_t *aBuf, uint16_t aBufLength);
 
 private:
-
     enum
     {
-        kUartTxBufferSize = OPENTHREAD_CONFIG_NCP_UART_TX_CHUNK_SIZE,  // Uart tx buffer size.
-        kTxBufferSize = OPENTHREAD_CONFIG_NCP_TX_BUFFER_SIZE,          // Tx Buffer size (used by mTxFrameBuffer).
-        kRxBufferSize = OPENTHREAD_CONFIG_NCP_UART_RX_BUFFER_SIZE,     // Rx buffer size (should be large enough to fit
-                                                                       // one whole (decoded) received frame).
+        kUartTxBufferSize = OPENTHREAD_CONFIG_NCP_UART_TX_CHUNK_SIZE,   // Uart tx buffer size.
+        kRxBufferSize     = OPENTHREAD_CONFIG_NCP_UART_RX_BUFFER_SIZE + // Rx buffer size (should be large enough to fit
+                        OPENTHREAD_CONFIG_NCP_SPINEL_ENCRYPTER_EXTRA_DATA_SIZE, // one whole (decoded) received frame).
     };
 
     enum UartTxState
     {
-        kStartingFrame,          // Starting a new frame.
-        kEncodingFrame,          // In middle of encoding a frame.
-        kFinalizingFrame,        // Finalizing a frame.
+        kStartingFrame,   // Starting a new frame.
+        kEncodingFrame,   // In middle of encoding a frame.
+        kFinalizingFrame, // Finalizing a frame.
     };
 
-    class UartTxBuffer : public Hdlc::Encoder::BufferWriteIterator
+#if OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER
+    /**
+     * Wraps NcpFrameBuffer allowing to read data through spinel encrypter.
+     * Creates additional buffers to allow transforming of the whole spinel frames.
+     */
+    class NcpFrameBufferEncrypterReader
     {
     public:
-        UartTxBuffer(void);
-
-        void           Clear(void);
-        bool           IsEmpty(void) const;
-        uint16_t       GetLength(void) const;
-        const uint8_t *GetBuffer(void) const;
+        /**
+         * C-tor.
+         * Takes a reference to NcpFrameBuffer in order to read spinel frames.
+         */
+        explicit NcpFrameBufferEncrypterReader(NcpFrameBuffer &aTxFrameBuffer);
+        bool    IsEmpty(void) const;
+        otError OutFrameBegin(void);
+        bool    OutFrameHasEnded(void);
+        uint8_t OutFrameReadByte(void);
+        otError OutFrameRemove(void);
 
     private:
-        uint8_t        mBuffer[kUartTxBufferSize];
+        void Reset(void);
+
+        NcpFrameBuffer &mTxFrameBuffer;
+        uint8_t         mDataBuffer[kRxBufferSize];
+        size_t          mDataBufferReadIndex;
+        size_t          mOutputDataLength;
     };
+#endif // OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER
 
-    void            EncodeAndSendToUart(void);
-    void            HandleFrame(uint8_t *aBuf, uint16_t aBufLength);
-    void            HandleError(ThreadError aError, uint8_t *aBuf, uint16_t aBufLength);
-    void            TxFrameBufferHasData(void);
+    void EncodeAndSendToUart(void);
+    void HandleFrame(otError aError);
+    void HandleError(otError aError, uint8_t *aBuf, uint16_t aBufLength);
+    void TxFrameBufferHasData(void);
+    void HandleFrameAddedToNcpBuffer(void);
 
-    static void     EncodeAndSendToUart(void *aContext);
-    static void     HandleFrame(void *context, uint8_t *aBuf, uint16_t aBufLength);
-    static void     HandleError(void *context, ThreadError aError, uint8_t *aBuf, uint16_t aBufLength);
-    static void     TxFrameBufferHasData(void *aContext, NcpFrameBuffer *aNcpFrameBuffer);
+    static void EncodeAndSendToUart(Tasklet &aTasklet);
+    static void HandleFrame(void *aContext, otError aError);
+    static void HandleFrameAddedToNcpBuffer(void *                   aContext,
+                                            NcpFrameBuffer::FrameTag aTag,
+                                            NcpFrameBuffer::Priority aPriority,
+                                            NcpFrameBuffer *         aNcpFrameBuffer);
 
-    Hdlc::Encoder   mFrameEncoder;
-    Hdlc::Decoder   mFrameDecoder;
-    UartTxBuffer    mUartBuffer;
-    NcpFrameBuffer  mTxFrameBuffer;
-    UartTxState     mState;
-    uint8_t         mByte;
-    uint8_t         mTxBuffer[kTxBufferSize];
-    uint8_t         mRxBuffer[kRxBufferSize];
-    Tasklet         mUartSendTask;
+    Hdlc::Encoder                        mFrameEncoder;
+    Hdlc::Decoder                        mFrameDecoder;
+    Hdlc::FrameBuffer<kUartTxBufferSize> mUartBuffer;
+    UartTxState                          mState;
+    uint8_t                              mByte;
+    Hdlc::FrameBuffer<kRxBufferSize>     mRxBuffer;
+    bool                                 mUartSendImmediate;
+    Tasklet                              mUartSendTask;
+
+#if OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER
+    NcpFrameBufferEncrypterReader mTxFrameBufferEncrypterReader;
+#endif // OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER
 };
 
-}  // namespace Thread
+} // namespace Ncp
+} // namespace ot
 
-#endif  // NCP_UART_HPP_
+#endif // NCP_UART_HPP_

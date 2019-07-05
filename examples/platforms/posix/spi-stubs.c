@@ -30,44 +30,46 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <platform/uart.h>
-#include <platform/spi-slave.h>
+
+#include <openthread/config.h>
+#include <openthread/platform/spi-slave.h>
+#include <openthread/platform/uart.h>
+
+#if OPENTHREAD_ENABLE_NCP_SPI
 
 // Spi-slave stubs
 
-ThreadError otPlatSpiSlaveEnable(
-    otPlatSpiSlaveTransactionCompleteCallback aCallback,
-    void *aContext
-)
+otError otPlatSpiSlaveEnable(otPlatSpiSlaveTransactionCompleteCallback aCompleteCallback,
+                             otPlatSpiSlaveTransactionProcessCallback  aProcessCallback,
+                             void *                                    aContext)
 {
-    (void)aCallback;
-    (void)aContext;
+    OT_UNUSED_VARIABLE(aCompleteCallback);
+    OT_UNUSED_VARIABLE(aProcessCallback);
+    OT_UNUSED_VARIABLE(aContext);
 
     fprintf(stderr, "\nNo SPI support for posix platform.");
     exit(0);
 
-    return kThreadError_NotImplemented;
+    return OT_ERROR_NOT_IMPLEMENTED;
 }
 
 void otPlatSpiSlaveDisable(void)
 {
 }
 
-ThreadError otPlatSpiSlavePrepareTransaction(
-    uint8_t *anOutputBuf,
-    uint16_t anOutputBufLen,
-    uint8_t *anInputBuf,
-    uint16_t anInputBufLen,
-    bool aRequestTransactionFlag
-)
+otError otPlatSpiSlavePrepareTransaction(uint8_t *aOutputBuf,
+                                         uint16_t aOutputBufLen,
+                                         uint8_t *aInputBuf,
+                                         uint16_t aInputBufLen,
+                                         bool     aRequestTransactionFlag)
 {
-    (void)anOutputBuf;
-    (void)anOutputBufLen;
-    (void)anInputBuf;
-    (void)anInputBufLen;
-    (void)aRequestTransactionFlag;
+    OT_UNUSED_VARIABLE(aOutputBuf);
+    OT_UNUSED_VARIABLE(aOutputBufLen);
+    OT_UNUSED_VARIABLE(aInputBuf);
+    OT_UNUSED_VARIABLE(aInputBufLen);
+    OT_UNUSED_VARIABLE(aRequestTransactionFlag);
 
-    return kThreadError_NotImplemented;
+    return OT_ERROR_NOT_IMPLEMENTED;
 }
 
 // Uart
@@ -78,6 +80,8 @@ void otPlatUartSendDone(void)
 
 void otPlatUartReceived(const uint8_t *aBuf, uint16_t aBufLength)
 {
-    (void)aBuf;
-    (void)aBufLength;
+    OT_UNUSED_VARIABLE(aBuf);
+    OT_UNUSED_VARIABLE(aBufLength);
 }
+
+#endif // OPENTHREAD_ENABLE_NCP_SPI

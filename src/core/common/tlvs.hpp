@@ -34,16 +34,21 @@
 #ifndef TLVS_HPP_
 #define TLVS_HPP_
 
-#include <string.h>
+#include "openthread-core-config.h"
 
-#include <openthread-types.h>
-#include <common/encoding.hpp>
-#include <common/message.hpp>
+#include "utils/wrap_string.h"
 
-using Thread::Encoding::BigEndian::HostSwap16;
-using Thread::Encoding::BigEndian::HostSwap32;
+#include <openthread/error.h>
+#include <openthread/platform/toolchain.h>
 
-namespace Thread {
+#include "common/encoding.hpp"
+
+namespace ot {
+
+using ot::Encoding::BigEndian::HostSwap16;
+using ot::Encoding::BigEndian::HostSwap32;
+
+class Message;
 
 /**
  * This class implements TLV generation and parsing.
@@ -91,7 +96,7 @@ public:
      * @returns The total size include Type, Length, and Value fields.
      *
      */
-    uint8_t GetSize(void) const { return sizeof(Tlv) + mLength; }
+    uint16_t GetSize(void) const { return sizeof(Tlv) + mLength; }
 
     /**
      * This method returns a pointer to the Value.
@@ -115,9 +120,7 @@ public:
      * @returns A pointer to the next TLV.
      *
      */
-    Tlv *GetNext(void) {
-        return reinterpret_cast<Tlv *>(reinterpret_cast<uint8_t *>(this) + sizeof(*this) + mLength);
-    }
+    Tlv *GetNext(void) { return reinterpret_cast<Tlv *>(reinterpret_cast<uint8_t *>(this) + sizeof(*this) + mLength); }
 
     /**
      * This method returns a pointer to the next TLV.
@@ -125,7 +128,8 @@ public:
      * @returns A pointer to the next TLV.
      *
      */
-    const Tlv *GetNext(void) const {
+    const Tlv *GetNext(void) const
+    {
         return reinterpret_cast<const Tlv *>(reinterpret_cast<const uint8_t *>(this) + sizeof(*this) + mLength);
     }
 
@@ -137,11 +141,11 @@ public:
      * @param[in]   aMaxLength  Maximum number of bytes to read.
      * @param[out]  aTlv        A reference to the TLV that will be copied to.
      *
-     * @retval kThreadError_None      Successfully copied the TLV.
-     * @retval kThreadError_NotFound  Could not find the TLV with Type @p aType.
+     * @retval OT_ERROR_NONE       Successfully copied the TLV.
+     * @retval OT_ERROR_NOT_FOUND  Could not find the TLV with Type @p aType.
      *
      */
-    static ThreadError Get(const Message &aMessage, uint8_t aType, uint16_t aMaxLength, Tlv &aTlv);
+    static otError Get(const Message &aMessage, uint8_t aType, uint16_t aMaxLength, Tlv &aTlv);
 
     /**
      * This static method obtains the offset of a TLV within @p aMessage.
@@ -150,11 +154,11 @@ public:
      * @param[in]   aType       The Type value to search for.
      * @param[out]  aOffset     A reference to the offset of the TLV.
      *
-     * @retval kThreadError_None      Successfully copied the TLV.
-     * @retval kThreadError_NotFound  Could not find the TLV with Type @p aType.
+     * @retval OT_ERROR_NONE       Successfully copied the TLV.
+     * @retval OT_ERROR_NOT_FOUND  Could not find the TLV with Type @p aType.
      *
      */
-    static ThreadError GetOffset(const Message &aMessage, uint8_t aType, uint16_t &aOffset);
+    static otError GetOffset(const Message &aMessage, uint8_t aType, uint16_t &aOffset);
 
     /**
      * This static method finds the offset and length of a given TLV type.
@@ -164,11 +168,11 @@ public:
      * @param[out]  aOffset     The offset where the value starts.
      * @param[out]  aLength     The length of the value.
      *
-     * @retval kThreadError_None      Successfully found the TLV.
-     * @retval kThreadError_NotFound  Could not find the TLV with Type @p aType.
+     * @retval OT_ERROR_NONE       Successfully found the TLV.
+     * @retval OT_ERROR_NOT_FOUND  Could not find the TLV with Type @p aType.
      *
      */
-    static ThreadError GetValueOffset(const Message &aMesasge, uint8_t aType, uint16_t &aOffset, uint16_t &aLength);
+    static otError GetValueOffset(const Message &aMessage, uint8_t aType, uint16_t &aOffset, uint16_t &aLength);
 
 protected:
     /**
@@ -186,7 +190,7 @@ private:
 } OT_TOOL_PACKED_END;
 
 OT_TOOL_PACKED_BEGIN
-class ExtendedTlv: public Tlv
+class ExtendedTlv : public Tlv
 {
 public:
     /**
@@ -201,12 +205,16 @@ public:
      * @param[in]  aLength  The Length value.
      *
      */
-    void SetLength(uint16_t aLength) { Tlv::SetLength(kExtendedLength); mLength = HostSwap16(aLength); }
+    void SetLength(uint16_t aLength)
+    {
+        Tlv::SetLength(kExtendedLength);
+        mLength = HostSwap16(aLength);
+    }
 
 private:
     uint16_t mLength;
 } OT_TOOL_PACKED_END;
 
-}  // namespace Thread
+} // namespace ot
 
-#endif  // TLVS_HPP_
+#endif // TLVS_HPP_

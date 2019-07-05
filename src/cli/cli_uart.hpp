@@ -34,18 +34,21 @@
 #ifndef CLI_UART_HPP_
 #define CLI_UART_HPP_
 
-#include <openthread-types.h>
-#include <cli/cli_server.hpp>
-#include <common/tasklet.hpp>
+#include "openthread-core-config.h"
 
-namespace Thread {
+#include "cli/cli.hpp"
+#include "cli/cli_server.hpp"
+#include "common/instance.hpp"
+#include "common/tasklet.hpp"
+
+namespace ot {
 namespace Cli {
 
 /**
  * This class implements the CLI server on top of the UART platform abstraction.
  *
  */
-class Uart: public Server
+class Uart : public Server
 {
 public:
     /**
@@ -54,7 +57,7 @@ public:
      * @param[in]  aInstance  The OpenThread instance structure.
      *
      */
-    Uart(otInstance *aInstance);
+    explicit Uart(Instance *aInstance);
 
     /**
      * This method delivers raw characters to the client.
@@ -65,61 +68,34 @@ public:
      * @returns The number of bytes placed in the output queue.
      *
      */
-    int Output(const char *aBuf, uint16_t aBufLength);
-
-    /**
-     * This method delivers formatted output to the client.
-     *
-     * @param[in]  aFmt  A pointer to the format string.
-     * @param[in]  ...   A variable list of arguments to format.
-     *
-     * @returns The number of bytes placed in the output queue.
-     *
-     */
-    int OutputFormat(const char *fmt, ...);
-
-    /**
-     * This method delivers formatted output to the client.
-     *
-     * @param[in]  aFmt  A pointer to the format string.
-     * @param[in]  aAp   A variable list of arguments for format.
-     *
-     * @returns The number of bytes placed in the output queue.
-     *
-     */
-    int OutputFormatV(const char *aFmt, va_list aAp);
+    virtual int Output(const char *aBuf, uint16_t aBufLength);
 
     void ReceiveTask(const uint8_t *aBuf, uint16_t aBufLength);
     void SendDoneTask(void);
 
-    static Uart *sUartServer;
-
 private:
     enum
     {
-        kRxBufferSize = 512,
-        kTxBufferSize = 1024,
-        kMaxLineLength = 128,
+        kRxBufferSize = OPENTHREAD_CONFIG_CLI_UART_RX_BUFFER_SIZE,
+        kTxBufferSize = OPENTHREAD_CONFIG_CLI_UART_TX_BUFFER_SIZE,
     };
 
-    ThreadError ProcessCommand(void);
-    void Send(void);
+    otError ProcessCommand(void);
+    void    Send(void);
 
-    char mRxBuffer[kRxBufferSize];
+    char     mRxBuffer[kRxBufferSize];
     uint16_t mRxLength;
 
-    char mTxBuffer[kTxBufferSize];
+    char     mTxBuffer[kTxBufferSize];
     uint16_t mTxHead;
     uint16_t mTxLength;
 
     uint16_t mSendLength;
 
-    Interpreter mInterpreter;
-
     friend class Interpreter;
 };
 
-}  // namespace Cli
-}  // namespace Thread
+} // namespace Cli
+} // namespace ot
 
-#endif  // CLI_UART_HPP_
+#endif // CLI_UART_HPP_

@@ -31,21 +31,20 @@
  *   This file implements common MeshCoP timestamp processing.
  */
 
-#include <string.h>
+#include "timestamp.hpp"
 
-#include <openthread-types.h>
-#include <meshcop/timestamp.hpp>
+#include "utils/wrap_string.h"
 
-namespace Thread {
+namespace ot {
 namespace MeshCoP {
 
 int Timestamp::Compare(const Timestamp &aCompare) const
 {
-    uint64_t thisSeconds = GetSeconds();
+    uint64_t thisSeconds    = GetSeconds();
     uint64_t compareSeconds = aCompare.GetSeconds();
-    uint16_t thisTicks = GetTicks();
-    uint16_t compareTicks = aCompare.GetTicks();
-    int rval;
+    uint16_t thisTicks      = GetTicks();
+    uint16_t compareTicks   = aCompare.GetTicks();
+    int      rval;
 
     if (compareSeconds > thisSeconds)
     {
@@ -71,5 +70,5 @@ int Timestamp::Compare(const Timestamp &aCompare) const
     return rval;
 }
 
-}  // namespace MeshCoP
-}  // namespace Thread
+} // namespace MeshCoP
+} // namespace ot

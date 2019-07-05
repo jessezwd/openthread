@@ -26,16 +26,19 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdio.h>
 #include <stdint.h>
-#include <platform/toolchain.h>
-#include <thread/topology.hpp>
+#include <stdio.h>
+
+#include <openthread/ip6.h>
+#include <openthread/platform/toolchain.h>
+
 #include "test_util.h"
+#include "thread/topology.hpp"
 
 extern "C" {
-    uint32_t otNetifAddress_Size_c();
-    uint32_t otNetifAddress_offset_mNext_c();
-    otNetifAddress CreateNetif_c();
+uint32_t       otNetifAddress_Size_c();
+uint32_t       otNetifAddress_offset_mNext_c();
+otNetifAddress CreateNetif_c();
 }
 
 void test_packed1()
@@ -92,11 +95,11 @@ void test_packed_union()
 
 void test_packed_enum()
 {
-    Thread::Neighbor neighbor;
-    neighbor.mState = Thread::Neighbor::kStateValid;
+    ot::Neighbor neighbor;
+    neighbor.SetState(ot::Neighbor::kStateValid);
 
     // Make sure that when we read the 3 bit field it is read as unsigned, so it return '4'
-    VerifyOrQuit(neighbor.mState == Thread::Neighbor::kStateValid, "Toolchain::OT_TOOL_PACKED failed 4\n");
+    VerifyOrQuit(neighbor.GetState() == ot::Neighbor::kStateValid, "Toolchain::OT_TOOL_PACKED failed 4\n");
 }
 
 void test_addr_sizes()

@@ -34,36 +34,53 @@
 #ifndef DEBUG_HPP_
 #define DEBUG_HPP_
 
+#include "openthread-core-config.h"
+
 #include <ctype.h>
 #include <stdio.h>
-#include <string.h>
+#include "utils/wrap_string.h"
 
 #if defined(OPENTHREAD_TARGET_DARWIN) || defined(OPENTHREAD_TARGET_LINUX)
 
 #include <assert.h>
 
-#elif defined(_KERNEL_MODE)
+#elif OPENTHREAD_CONFIG_PLATFORM_ASSERT_MANAGEMENT
 
-#include <wdm.h>
+#include "openthread/platform/misc.h"
 
-#define assert(exp) \
-    ((!(exp)) ? \
-        (RtlAssert( #exp, __FILE__, __LINE__, NULL ),FALSE) : \
-        TRUE)
+/**
+ * Allow the build system to provide a custom file name.
+ *
+ */
+#ifndef FILE_NAME
+#define FILE_NAME __FILE__
+#endif
 
-#elif defined(_WIN32)
-
-#include <assert.h>
+#define assert(cond)                               \
+    do                                             \
+    {                                              \
+        if (!(cond))                               \
+        {                                          \
+            otPlatAssertFail(FILE_NAME, __LINE__); \
+            while (1)                              \
+            {                                      \
+            }                                      \
+        }                                          \
+    } while (0)
 
 #else
 
-#define assert(cond)                            \
-  do {                                          \
-    if (!(cond)) {                              \
-      while (1) {}                              \
-    }                                           \
-  } while (0)
+#define assert(cond)  \
+    do                \
+    {                 \
+        if (!(cond))  \
+        {             \
+            while (1) \
+            {         \
+            }         \
+        }             \
+    } while (0)
 
 #endif
 
-#endif  // DEBUG_HPP_
+#endif // DEBUG_HPP_

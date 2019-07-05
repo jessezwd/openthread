@@ -1,6 +1,9 @@
-/*
- *  Minimal configuration for using TLS as part of Thread
+/**
+ * \file config-thread.h
  *
+ * \brief Minimal configuration for using TLS as part of Thread
+ */
+/*
  *  Copyright (C) 2006-2015, ARM Limited, All Rights Reserved
  *  SPDX-License-Identifier: Apache-2.0
  *
@@ -57,6 +60,7 @@
 #define MBEDTLS_CCM_C
 #define MBEDTLS_CIPHER_C
 #define MBEDTLS_CTR_DRBG_C
+#define MBEDTLS_CMAC_C
 #define MBEDTLS_ECJPAKE_C
 #define MBEDTLS_ECP_C
 #define MBEDTLS_ENTROPY_C

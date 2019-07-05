@@ -68,31 +68,30 @@ AC_SUBST(LIBOPENTHREAD_VERSION_INFO,     [${LIBOPENTHREAD_VERSION_CURRENT}:${LIB
 # Check the sanity of the source directory by checking for the
 # presence of a key watch file
 #
-AC_CONFIG_SRCDIR([include/openthread.h])
+AC_CONFIG_SRCDIR([include/openthread/error.h])
 
 #
 # Tell autoconf where to find auxilliary build tools (e.g. config.guess,
 # install-sh, missing, etc.)
 #
-AC_CONFIG_AUX_DIR([third_party/nlbuild-autotools/repo/autoconf])
+AC_CONFIG_AUX_DIR([third_party/nlbuild-autotools/repo/third_party/autoconf])
 
 #
 # Tell autoconf where to find auxilliary M4 macros
 #
-AC_CONFIG_MACRO_DIR([third_party/nlbuild-autotools/repo/autoconf/m4])
+AC_CONFIG_MACRO_DIRS([third_party/nlbuild-autotools/repo/third_party/autoconf/m4 third_party/nlbuild-autotools/repo/autoconf/m4])
 
 #
 # Tell autoconf what file the package is using to aggregate C preprocessor
 # defines.
 #
-AC_CONFIG_HEADERS([include/openthread-config.h])
+AC_CONFIG_HEADERS([include/openthread-config-generic.h])
 
 #
-# Figure out what the canonical build, host and target tuples are.
+# Figure out what the canonical build and host tuples are.
 #
 AC_CANONICAL_BUILD
 AC_CANONICAL_HOST
-AC_CANONICAL_TARGET
 
 #
 # Mac OS X / Darwin ends up putting some versioning cruft on the end of its
@@ -102,7 +101,6 @@ AC_CANONICAL_TARGET
 
 NL_FILTERED_CANONICAL_BUILD
 NL_FILTERED_CANONICAL_HOST
-NL_FILTERED_CANONICAL_TARGET
 
 #
 # Configure automake with the desired options, indicating that this is not
@@ -132,10 +130,10 @@ AM_SILENT_RULES([yes])
 AM_MAINTAINER_MODE
 
 #
-# Check for target
+# Host-os-specific checks
 #
 
-case ${target_os} in
+case ${host_os} in
 
     *darwin*)
         OPENTHREAD_TARGET=darwin
@@ -161,16 +159,23 @@ AC_SUBST(OPENTHREAD_TARGET_DEFINES)
 # Checks for build host programs
 #
 
-# If we are cross-compiling and we are on an embedded target that
-# doesn't support independent, standalone executables, then all
-# compiler tests that attempt to create an executable will fail. In
-# such circumstances, set AC_NO_EXECUTABLES (see http://sourceware.org/
-# ml/newlib/2006/msg00353.html).
-
+# This is a hack to restore some old broken behavior that was
+# removed in pull request #1527. It's use is highly discouraged,
+# you should try to fix your build environment instead.
+AC_ARG_ENABLE(no-executables-hack,
+    [AS_HELP_STRING([--enable-no-executables-hack],
+        [Enable hack that prevents link checks at configure time. Highly discouraged.])])
 AC_MSG_CHECKING([whether to disable executable checking])
-if test "$cross_compiling" = yes; then
-    AC_NO_EXECUTABLES
+if test "${enable_no_executables_hack}" = "yes"
+then
     AC_MSG_RESULT([yes])
+    AC_NO_EXECUTABLES
+    # Here we guess conservative values for tests that require link checks
+    # to test for these features. This will prevent these checks from
+    # being performed later in the configuration process.
+    ac_cv_func_strlcat=${ac_cv_func_strlcat-no}
+    ac_cv_func_strlcpy=${ac_cv_func_strlcpy-no}
+    ac_cv_func_strnlen=${ac_cv_func_strnlen-no}
 else
     AC_MSG_RESULT([no])
 fi
@@ -201,6 +206,8 @@ AC_PROG_CXXCPP
 AC_PROG_CXX
 AC_PROG_CXX_C_O
 
+AM_PROG_AS
+
 # Check for other compiler toolchain tools.
 
 AC_CHECK_TOOL(AR, ar)
@@ -213,6 +220,8 @@ AC_CHECK_TOOL(STRIP, strip)
 AC_PROG_INSTALL
 AC_PROG_LN_S
 
+AC_PATH_PROG(CMP, cmp)
+
 #
 # Checks for specific compiler characteristics
 #
@@ -224,7 +233,7 @@ AC_PROG_LN_S
 #
 
 PROSPECTIVE_CFLAGS="-Wall -Wextra -Wshadow -Werror -std=c99 -pedantic-errors"
-PROSPECTIVE_CXXFLAGS="-Wall -Wextra -Wshadow -Werror -std=gnu++98 -Wno-c++14-compat"
+PROSPECTIVE_CXXFLAGS="-Wall -Wextra -Wshadow -Werror -std=gnu++98 -Wno-c++14-compat -fno-exceptions"
 
 AC_CACHE_CHECK([whether $CC is Clang],
     [nl_cv_clang],
@@ -251,6 +260,11 @@ AX_CHECK_COMPILER_OPTIONS([C++], ${PROSPECTIVE_CXXFLAGS})
 # Check for and initialize libtool
 
 LT_INIT
+AC_PROG_LIBTOOL
+
+# Disable building shared libraries by default (can be enabled with --enable-shared)
+
+AC_DISABLE_SHARED
 
 #
 # Debug instances
@@ -283,14 +297,75 @@ NL_ENABLE_OPTIMIZATION([yes])
 
 AM_CONDITIONAL([OPENTHREAD_BUILD_OPTIMIZED], [test "${nl_cv_build_optimized}" = "yes"])
 
+# Fuzz Targets
+
+AC_MSG_CHECKING([whether to build fuzz targets])
+AC_ARG_ENABLE(fuzz-targets,
+    [AS_HELP_STRING([--enable-fuzz-targets],[Enable building of fuzz targets @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_fuzz_targets=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enableval} for --enable-fuzz-targets])
+            ;;
+
+        esac
+    ],
+    [enable_fuzz_targets=no])
+AC_MSG_RESULT(${enable_fuzz_targets})
+
+AM_CONDITIONAL([OPENTHREAD_ENABLE_FUZZ_TARGETS], [test "${enable_fuzz_targets}" = "yes"])
+
+if test "${enable_fuzz_targets}" = "no" ; then
+    PROSPECTIVE_CXXFLAGS="-fno-rtti"
+    AX_CHECK_COMPILER_OPTIONS([C++], ${PROSPECTIVE_CXXFLAGS})
+fi
+
+# Address Sanitizer
+
+AC_MSG_CHECKING([whether to build with Address Sanitizer support])
+AC_ARG_ENABLE(address-sanitizer,
+    [AS_HELP_STRING([--enable-address-sanitizer],[Enable Address Sanitizer support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_address_sanitizer=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enableval} for --enable-address-sanitizer])
+            ;;
+
+        esac
+    ],
+    [enable_address_sanitizer=no])
+AC_MSG_RESULT(${enable_address_sanitizer})
+
+AM_CONDITIONAL([OPENTHREAD_WITH_ADDRESS_SANITIZER], [test "${enable_address_sanitizer}" = "yes"])
+
+if test "${enable_address_sanitizer}" = "yes" ; then
+
+    PROSPECTIVE_CFLAGS="-fsanitize=address"
+
+    # Check if the compilers support address sanitizer
+    AX_CHECK_COMPILER_OPTIONS([C],   ${PROSPECTIVE_CFLAGS})
+    AX_CHECK_COMPILER_OPTIONS([C++], ${PROSPECTIVE_CFLAGS})
+
+fi
+
 #
 # Code style
 #
 
-AC_SUBST(PRETTY, ["\${abs_top_srcdir}/.astyle/astyle-wrap.sh"])
-AC_SUBST(PRETTY_ARGS, ["astyle --options=\${abs_top_builddir}/.astyle/astyle-opts"])
-AC_SUBST(PRETTY_CHECK, ["\${abs_top_srcdir}/.astyle/astyle-wrap.sh"])
-AC_SUBST(PRETTY_CHECK_ARGS, ["astyle --options=\${abs_top_builddir}/.astyle/astyle-opts --dry-run"])
+AC_SUBST(PRETTY, ["\${abs_top_srcdir}/script/clang-format.sh"])
+AC_SUBST(PRETTY_ARGS, ["-style=file -i"])
+AC_SUBST(PRETTY_CHECK, ["\${abs_top_srcdir}/script/clang-format-check.sh"])
+AC_SUBST(PRETTY_CHECK_ARGS, [""])
 
 #
 # Tests
@@ -303,130 +378,36 @@ NL_ENABLE_TESTS([yes])
 
 AM_CONDITIONAL([OPENTHREAD_BUILD_TESTS], [test "${nl_cv_build_tests}" = "yes"])
 
-# Check whether to run only the minimum set of tests.
-
-AC_ARG_WITH(tests,
-    [AS_HELP_STRING([--with-tests=TESTS],
-        [Specify the tests from one of: all, subset1, subset2, subset3, subset4, subset5 @<:@default=all@:>@.])],
-    [
-        case "${with_tests}" in
-
-        all|subset1|subset2|subset3|subset4|subset5)
-            ;;
-        *)
-            AC_MSG_ERROR([Invalid value ${with_tests} for --with-tests])
-            ;;
-        esac
-    ],
-    [with_tests=all])
-
-case ${with_tests} in
-
-    all)
-        OPENTHREAD_TESTS_SUBSET1=yes
-        OPENTHREAD_TESTS_SUBSET2=yes
-        OPENTHREAD_TESTS_SUBSET3=yes
-        OPENTHREAD_TESTS_SUBSET4=yes
-        OPENTHREAD_TESTS_SUBSET5=yes
-        ;;
-
-    subset1)
-        OPENTHREAD_TESTS_SUBSET1=yes
-        ;;
-
-    subset2)
-        OPENTHREAD_TESTS_SUBSET2=yes
-        ;;
-
-    subset3)
-        OPENTHREAD_TESTS_SUBSET3=yes
-        ;;
-
-    subset4)
-        OPENTHREAD_TESTS_SUBSET4=yes
-        ;;
-
-    subset5)
-        OPENTHREAD_TESTS_SUBSET5=yes
-        ;;
-
-esac
-
-AC_SUBST(OPENTHREAD_TESTS_SUBSET1)
-AM_CONDITIONAL([OPENTHREAD_TESTS_SUBSET1], [test "${OPENTHREAD_TESTS_SUBSET1}" = "yes"])
-AM_CONDITIONAL([OPENTHREAD_TESTS_SUBSET2], [test "${OPENTHREAD_TESTS_SUBSET2}" = "yes"])
-AM_CONDITIONAL([OPENTHREAD_TESTS_SUBSET3], [test "${OPENTHREAD_TESTS_SUBSET3}" = "yes"])
-AM_CONDITIONAL([OPENTHREAD_TESTS_SUBSET4], [test "${OPENTHREAD_TESTS_SUBSET4}" = "yes"])
-AM_CONDITIONAL([OPENTHREAD_TESTS_SUBSET5], [test "${OPENTHREAD_TESTS_SUBSET5}" = "yes"])
-
-# Check for Python and Python libraries used in the tests
-if test "${nl_cv_build_tests}" = "yes"; then
-    AC_MSG_CHECKING([checking for Python and Python libraries used in tests.])
-
-    # Check for Python
-    python --version 2> /dev/null
-    if test $? != 0; then
-        AC_MSG_ERROR(["Cannot run tests: missing Python."])
-    fi
-
-    # Check for Python pexpect library
-    python -c 'import pexpect' 2> /dev/null
-    if test $? != 0; then
-        AC_MSG_ERROR(["Cannot run tests: missing Python pexpect library."])
-    fi
-
-    AC_MSG_RESULT([ok])
-fi
-
 #
-# CLI Library
+# Multiple OpenThread Instances
 #
 
-AC_ARG_ENABLE(cli,
-    [AS_HELP_STRING([--enable-cli],[Enable CLI support @<:@default=no@:>@.])],
+AC_ARG_ENABLE(multiple-instances,
+    [AS_HELP_STRING([--enable-multiple-instances],[Enable support for multiple OpenThread instances @<:@default=no@:>@.])],
     [
         case "${enableval}" in
 
         no|yes)
-            enable_cli=${enableval}
+            enable_multiple_instances=${enableval}
             ;;
 
         *)
-            AC_MSG_ERROR([Invalid value ${with_cli} for --enable-cli])
+            AC_MSG_ERROR([Invalid value ${enable_multiple_instances} for --enable-multiple-instances])
             ;;
         esac
     ],
-    [enable_cli=no])
-AC_MSG_RESULT(${enable_cli})
-AM_CONDITIONAL([OPENTHREAD_ENABLE_CLI], [test "${enable_cli}" = "yes"])
+    [enable_multiple_instances=no])
 
-#
-# NCP Library
-#
+if test "$enable_multiple_instances" = "yes"; then
+    OPENTHREAD_ENABLE_MULTIPLE_INSTANCES=1
+else
+    OPENTHREAD_ENABLE_MULTIPLE_INSTANCES=0
+fi
 
-AC_ARG_ENABLE(ncp,
-    [AS_HELP_STRING([--enable-ncp[[=spi|uart]]],[Enable NCP support @<:@default=no@:>@.])],
-    [
-        case "${enableval}" in
-
-        no|spi|uart)
-            enable_ncp=${enableval}
-            ;;
-
-        yes)
-            enable_ncp=uart
-            ;;
-
-        *)
-            AC_MSG_ERROR([Invalid value ${with_ncp} for --enable-ncp])
-            ;;
-        esac
-    ],
-    [enable_ncp=no])
-AC_MSG_RESULT(${enable_ncp})
-AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP],      [test "${enable_ncp}" != "no"])
-AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_SPI],  [test "${enable_ncp}"  = "spi"])
-AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_UART], [test "${enable_ncp}"  = "uart"])
+AC_MSG_RESULT(${enable_multiple_instances})
+AC_SUBST(OPENTHREAD_ENABLE_MULTIPLE_INSTANCES)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_MULTIPLE_INSTANCES], [test "${enable_multiple_instances}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_MULTIPLE_INSTANCES],[${OPENTHREAD_ENABLE_MULTIPLE_INSTANCES}],[Define to 1 if you want to enable support for multiple OpenThread instances.])
 
 #
 # Builtin mbedtls
@@ -448,14 +429,530 @@ AC_ARG_ENABLE(builtin-mbedtls,
     ],
     [enable_builtin_mbedtls=yes])
 
-if test "$enable_builtin_mbedtls" = "yes"; then
+if test "$enable_builtin_mbedtls" = "yes" -a ! "${MBEDTLS_CPPFLAGS}"; then
     MBEDTLS_CPPFLAGS="-I\${abs_top_srcdir}/third_party/mbedtls"
     MBEDTLS_CPPFLAGS="${MBEDTLS_CPPFLAGS} -I\${abs_top_srcdir}/third_party/mbedtls/repo/include"
-    MBEDTLS_CPPFLAGS="${MBEDTLS_CPPFLAGS} -I\${abs_top_srcdir}/third_party/mbedtls/repo/include/mbedtls"
     MBEDTLS_CPPFLAGS="${MBEDTLS_CPPFLAGS} -DMBEDTLS_CONFIG_FILE=\\\"mbedtls-config.h\\\""
 fi
+
+if test "$enable_builtin_mbedtls" = "yes"; then
+    OPENTHREAD_CONFIG_ENABLE_BUILTIN_MBEDTLS=1
+else
+    OPENTHREAD_CONFIG_ENABLE_BUILTIN_MBEDTLS=0
+fi
+
+AC_MSG_CHECKING([whether mbed TLS should be enabled])
 AC_MSG_RESULT(${enable_builtin_mbedtls})
+AC_DEFINE_UNQUOTED([OPENTHREAD_CONFIG_ENABLE_BUILTIN_MBEDTLS], [${OPENTHREAD_CONFIG_ENABLE_BUILTIN_MBEDTLS}], [Define to 1 if you want to enable support for bultin-mbedtls.])
 AM_CONDITIONAL([OPENTHREAD_ENABLE_BUILTIN_MBEDTLS], [test "${enable_builtin_mbedtls}" = "yes"])
+
+#
+# POSIX Application
+#
+
+AC_MSG_CHECKING([whether to build POSIX applicaton])
+AC_ARG_ENABLE(posix-app,
+    [AS_HELP_STRING([--enable-posix-app], [Build POSIX application @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_posix_app=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_posix_app} for --enable-posix-app])
+            ;;
+        esac
+    ],
+    [enable_posix_app=no])
+
+if test "$enable_posix_app" = "yes"; then
+    OPENTHREAD_PLATFORM_POSIX_APP=1
+else
+    OPENTHREAD_PLATFORM_POSIX_APP=0
+fi
+
+AC_MSG_RESULT(${enable_posix_app})
+AC_SUBST(OPENTHREAD_PLATFORM_POSIX_APP)
+AM_CONDITIONAL([OPENTHREAD_PLATFORM_POSIX_APP], [test "${enable_posix_app}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_PLATFORM_POSIX_APP], [${OPENTHREAD_PLATFORM_POSIX_APP}], [Define to 1 to build posix application.])
+
+#
+# POSIX Daemon
+#
+
+AC_MSG_CHECKING([whether to build POSIX applicaton in daemon mode])
+AC_ARG_ENABLE(posix-app-daemon,
+    [AS_HELP_STRING([--enable-posix-app-daemon], [Build POSIX application in daemon mode@<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_posix_app_daemon=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_posix_app} for --enable-posix-app-daemon])
+            ;;
+        esac
+    ],
+    [enable_posix_app_daemon=no])
+
+if test "$enable_posix_app_daemon" = "yes"; then
+    OPENTHREAD_ENABLE_POSIX_APP_DAEMON=1
+else
+    OPENTHREAD_ENABLE_POSIX_APP_DAEMON=0
+fi
+
+AC_MSG_RESULT(${enable_posix_app_daemon})
+AC_SUBST(OPENTHREAD_ENABLE_POSIX_APP_DAEMON)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_POSIX_APP_DAEMON], [test "${enable_posix_app_daemon}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_POSIX_APP_DAEMON], [${OPENTHREAD_ENABLE_POSIX_APP_DAEMON}], [Define to 1 to build posix application in daemon mode.])
+
+#
+# FTD Library
+#
+
+AC_MSG_CHECKING([whether to build FTD library])
+AC_ARG_ENABLE(ftd,
+    [AS_HELP_STRING([--enable-ftd], [Build FTD library @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_ftd=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_ftd} for --enable-ftd])
+            ;;
+        esac
+    ],
+    [enable_ftd=no])
+
+if test "$enable_ftd" = "yes"; then
+    OPENTHREAD_ENABLE_FTD=1
+else
+    OPENTHREAD_ENABLE_FTD=0
+fi
+
+AC_MSG_RESULT(${enable_ftd})
+AC_SUBST(OPENTHREAD_ENABLE_FTD)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_FTD], [test "${enable_ftd}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_FTD], [${OPENTHREAD_ENABLE_FTD}], [Define to 1 to build FTD library.])
+
+#
+# MTD Library
+#
+
+AC_MSG_CHECKING([whether to build MTD library])
+AC_ARG_ENABLE(mtd,
+    [AS_HELP_STRING([--enable-mtd], [Build MTD library @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_mtd=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_mtd} for --enable-mtd])
+            ;;
+        esac
+    ],
+    [enable_mtd=no])
+
+if test "$enable_mtd" = "yes"; then
+    OPENTHREAD_ENABLE_MTD=1
+else
+    OPENTHREAD_ENABLE_MTD=0
+fi
+
+AC_MSG_RESULT(${enable_mtd})
+AC_SUBST(OPENTHREAD_ENABLE_MTD)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_MTD], [test "${enable_mtd}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_MTD], [${OPENTHREAD_ENABLE_MTD}], [Define to 1 to build MTD library.])
+
+#
+# Radio Library
+#
+
+AC_MSG_CHECKING([whether to build radio-only library])
+AC_ARG_ENABLE(radio-only,
+    [AS_HELP_STRING([--enable-radio-only], [Build radio-only library @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_radio_only=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_radio_only} for --enable-radio-only])
+            ;;
+        esac
+    ],
+    [enable_radio_only=no])
+
+if test "$enable_radio_only" = "yes"; then
+    OPENTHREAD_ENABLE_RADIO_ONLY=1
+else
+    OPENTHREAD_ENABLE_RADIO_ONLY=0
+fi
+
+AC_MSG_RESULT(${enable_radio_only})
+AC_SUBST(OPENTHREAD_ENABLE_RADIO_ONLY)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_RADIO_ONLY], [test "${enable_radio_only}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_RADIO_ONLY], [${OPENTHREAD_ENABLE_RADIO_ONLY}], [Define to 1 to build radio-only library.])
+
+#
+# whether to build executables
+#
+
+AC_MSG_CHECKING([whether to build executables])
+AC_ARG_ENABLE(executable,
+    [AS_HELP_STRING([--enable-executable], [Build executables @<:@default=yes@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_executable=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_executable} for --enable-executable])
+            ;;
+        esac
+    ],
+    [enable_executable=yes])
+
+if test "$enable_executable" = "yes"; then
+    OPENTHREAD_ENABLE_EXECUTABLE=1
+else
+    OPENTHREAD_ENABLE_EXECUTABLE=0
+fi
+
+AC_MSG_RESULT(${enable_executable})
+AC_SUBST(OPENTHREAD_ENABLE_EXECUTABLE)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_EXECUTABLE], [test "${enable_executable}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_EXECUTABLE], [${OPENTHREAD_ENABLE_EXECUTABLE}], [Define to 1 to build executables.])
+
+#
+# CLI Library
+#
+
+AC_MSG_CHECKING([whether to build CLI library])
+AC_ARG_ENABLE(cli,
+    [AS_HELP_STRING([--enable-cli], [Build CLI library @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_cli=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_cli} for --enable-cli])
+            ;;
+        esac
+    ],
+    [enable_cli=no])
+
+if test "$enable_cli" = "yes"; then
+    OPENTHREAD_ENABLE_CLI=1
+else
+    OPENTHREAD_ENABLE_CLI=0
+fi
+
+AC_MSG_RESULT(${enable_cli})
+AC_SUBST(OPENTHREAD_ENABLE_CLI)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_CLI], [test "${enable_cli}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_CLI], [${OPENTHREAD_ENABLE_CLI}], [Define to 1 to build CLI library.])
+
+#
+# NCP Library
+#
+
+AC_MSG_CHECKING([whether to build NCP library])
+AC_ARG_ENABLE(ncp,
+    [AS_HELP_STRING([--enable-ncp], [Build NCP library @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_ncp=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_ncp} for --enable-ncp])
+            ;;
+        esac
+    ],
+    [enable_ncp=no])
+
+if test "$enable_ncp" = "yes"; then
+    OPENTHREAD_ENABLE_NCP=1
+else
+    OPENTHREAD_ENABLE_NCP=0
+fi
+
+AC_MSG_RESULT(${enable_ncp})
+AC_SUBST(OPENTHREAD_ENABLE_NCP)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP], [test "${enable_ncp}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_NCP], [${OPENTHREAD_ENABLE_NCP}], [Define to 1 to build NCP library.])
+
+#
+# NCP BUS - how does the NCP talk to the host?
+#
+
+AC_ARG_WITH(
+    [ncp-bus],
+    [AS_HELP_STRING([--with-ncp-bus],[Specify the NCP bus (none|spi|uart) @<:@default=none@:>@.])],
+    [
+        case "${with_ncp_bus}" in
+        "none")
+            OPENTHREAD_ENABLE_NCP_SPI=0
+            OPENTHREAD_ENABLE_NCP_UART=0
+            ;;
+        "spi")
+            OPENTHREAD_ENABLE_NCP_SPI=1
+            OPENTHREAD_ENABLE_NCP_UART=0
+            ;;
+        "uart")
+            OPENTHREAD_ENABLE_NCP_SPI=0
+            OPENTHREAD_ENABLE_NCP_UART=1
+            ;;
+        *)
+            AC_MSG_ERROR([unexpected --with-ncp-bus=${with_ncp_bus}])
+            ;;
+        esac
+    ],
+    [
+       OPENTHREAD_ENABLE_NCP_SPI=0
+       OPENTHREAD_ENABLE_NCP_UART=0
+    ])
+
+AC_SUBST(OPENTHREAD_ENABLE_NCP_SPI)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_SPI],  [test "${with_ncp_bus}"  = "spi"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_NCP_SPI],[${OPENTHREAD_ENABLE_NCP_SPI}],[Define to 1 to enable the NCP SPI interface.])
+AC_MSG_CHECKING([should NCP support SPI])
+AC_MSG_RESULT([${OPENTHREAD_ENABLE_SPI}])
+
+AC_SUBST(OPENTHREAD_ENABLE_NCP_UART)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_UART], [test "${with_ncp_bus}"  = "uart"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_NCP_UART],[${OPENTHREAD_ENABLE_NCP_UART}],[Define to 1 to enable the NCP UART interface.])
+AC_MSG_CHECKING([should NCP support UART])
+AC_MSG_RESULT([${OPENTHREAD_ENABLE_UART}])
+
+#
+# Readline - readline library to use for POSIX CLI
+#
+
+AC_ARG_WITH(
+    [readline],
+    [AS_HELP_STRING([--with-readline],[Specify the readline library (none|readline|edit) @<:@default=none@:>@.])],
+    [],
+    [with_readline=none])
+
+case "${with_readline}" in
+"none")
+    ;;
+"readline")
+    AC_CHECK_LIB([readline], [rl_callback_handler_install])
+    ;;
+"edit")
+    AC_CHECK_LIB([edit], [rl_callback_handler_install])
+    ;;
+*)
+    AC_MSG_ERROR([unexpected --with-readline=${with_readline}])
+    ;;
+esac
+
+#
+# Thread UDP forward
+#
+
+AC_MSG_CHECKING([whether to enable UDP forward])
+AC_ARG_ENABLE(udp_forward,
+    [AS_HELP_STRING([--enable-udp-forward], [Enable UDP forward support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_udp_forward=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_udp_forward} for --enable-udp-forward])
+            ;;
+        esac
+    ],
+    [enable_udp_forward=no])
+
+if test "$enable_udp_forward" = "yes"; then
+    OPENTHREAD_ENABLE_UDP_FORWARD=1
+else
+    OPENTHREAD_ENABLE_UDP_FORWARD=0
+fi
+
+AC_MSG_RESULT(${enable_udp_forward})
+AC_SUBST(OPENTHREAD_ENABLE_UDP_FORWARD)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_UDP_FORWARD], [test "${enable_udp_forward}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_UDP_FORWARD], [${OPENTHREAD_ENABLE_UDP_FORWARD}], [Define to 1 to enable the UDP forward feature.])
+
+#
+# Thread Border Agent
+#
+
+AC_MSG_CHECKING([whether to enable border agent])
+AC_ARG_ENABLE(border_agent,
+    [AS_HELP_STRING([--enable-border-agent], [Enable border agent support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_border_agent=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_border_agent} for --enable-border-agent])
+            ;;
+        esac
+    ],
+    [enable_border_agent=no])
+
+if test "${enable_border_agent}" = "yes"; then
+    OPENTHREAD_ENABLE_BORDER_AGENT=1
+else
+    OPENTHREAD_ENABLE_BORDER_AGENT=0
+fi
+
+AC_MSG_RESULT(${enable_border_agent})
+AC_SUBST(OPENTHREAD_ENABLE_BORDER_AGENT)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_BORDER_AGENT], [test "${enable_border_agent}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_BORDER_AGENT], [${OPENTHREAD_ENABLE_BORDER_AGENT}], [Define to 1 to enable the border agent feature.])
+
+#
+# Thread Network Diagnostic for MTD
+#
+
+AC_ARG_ENABLE(mtd_network_diagnostic,
+    [AS_HELP_STRING([--enable-mtd-network-diagnostic],[Enable network diagnostic support for MTD @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_mtd_network_diagnostic=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_mtd_network_diagnostic} for --enable-mtd-network-diagnostic])
+            ;;
+        esac
+    ],
+    [enable_mtd_network_diagnostic=no])
+
+if test "$enable_mtd_network_diagnostic" = "yes"; then
+    OPENTHREAD_ENABLE_MTD_NETWORK_DIAGNOSTIC=1
+else
+    OPENTHREAD_ENABLE_MTD_NETWORK_DIAGNOSTIC=0
+fi
+
+AC_MSG_CHECKING([whether to enable the network diagnostic for MTD])
+AC_MSG_RESULT(${enable_mtd_network_diagnostic})
+AC_SUBST(OPENTHREAD_ENABLE_MTD_NETWORK_DIAGNOSTIC)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_MTD_NETWORK_DIAGNOSTIC], [test "${enable_mtd_network_diagnostic}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_MTD_NETWORK_DIAGNOSTIC],[${OPENTHREAD_ENABLE_MTD_NETWORK_DIAGNOSTIC}],[Define to 1 to enable network diagnostic for MTD.])
+
+#
+# Application CoAP Secure
+#
+
+AC_ARG_ENABLE(application_coap_secure,
+    [AS_HELP_STRING([--enable-application-coap-secure],[Enable CoAP Secure to an application.@<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_application_coap_secure=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_application_coap_secure} for --enable-application-coap_secure])
+            ;;
+        esac
+    ],
+    [enable_application_coap_secure=no])
+
+if test "$enable_application_coap_secure" = "yes"; then
+    OPENTHREAD_ENABLE_APPLICATION_COAP_SECURE=1
+    enable_application_coap="yes"
+else
+    OPENTHREAD_ENABLE_APPLICATION_COAP_SECURE=0
+fi
+
+AC_SUBST(OPENTHREAD_ENABLE_APPLICATION_COAP_SECURE)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_APPLICATION_COAP_SECURE], [test "${enable_application_coap_secure}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_APPLICATION_COAP_SECURE],[${OPENTHREAD_ENABLE_APPLICATION_COAP_SECURE}],[Define to 1 if you want to enable CoAP Secure to an application.])
+
+#
+# Platform UDP
+#
+
+AC_ARG_ENABLE(platform_udp,
+    [AS_HELP_STRING([--enable-platform-udp],[Enable platform UDP support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+        no|yes)
+            enable_platform_udp=${enableval}
+            ;;
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_platform_udp} for --enable-platform-udp])
+            ;;
+        esac
+    ],
+    [enable_platform_udp=no])
+
+if test "$enable_platform_udp" = "yes"; then
+    OPENTHREAD_ENABLE_PLATFORM_UDP=1
+else
+    OPENTHREAD_ENABLE_PLATFORM_UDP=0
+fi
+
+AC_MSG_RESULT(${enable_platform_udp})
+AC_SUBST(OPENTHREAD_ENABLE_PLATFORM_UDP)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_PLATFORM_UDP], [test "${enable_platform_udp}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_PLATFORM_UDP], [${OPENTHREAD_ENABLE_PLATFORM_UDP}], [Define to 1 to enable platform UDP.])
+
+#
+# Platform Netif
+#
+
+AC_ARG_ENABLE(platform_netif,
+    [AS_HELP_STRING([--enable-platform-netif],[Enable platform Netif support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+        no|yes)
+            enable_platform_netif=${enableval}
+            ;;
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_platform_netif} for --enable-platform-netif])
+            ;;
+        esac
+    ],
+    [enable_platform_netif=no])
+
+if test "$enable_platform_netif" = "yes"; then
+    OPENTHREAD_ENABLE_PLATFORM_NETIF=1
+else
+    OPENTHREAD_ENABLE_PLATFORM_NETIF=0
+fi
+
+AC_MSG_RESULT(${enable_platform_netif})
+AC_SUBST(OPENTHREAD_ENABLE_PLATFORM_NETIF)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_PLATFORM_NETIF], [test "${enable_platform_netif}" = 'yes'])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_PLATFORM_NETIF], [${OPENTHREAD_ENABLE_PLATFORM_NETIF}], [Define to 1 to enable platform Netif.])
 
 #
 # Thread Commissioner
@@ -483,6 +980,7 @@ else
     OPENTHREAD_ENABLE_COMMISSIONER=0
 fi
 
+AC_MSG_CHECKING([whether to enable the commissioner])
 AC_MSG_RESULT(${enable_commissioner})
 AC_SUBST(OPENTHREAD_ENABLE_COMMISSIONER)
 AM_CONDITIONAL([OPENTHREAD_ENABLE_COMMISSIONER], [test "${enable_commissioner}" = "yes"])
@@ -514,12 +1012,13 @@ else
     OPENTHREAD_ENABLE_JOINER=0
 fi
 
+AC_MSG_CHECKING([whether to enable the joiner feature])
 AC_MSG_RESULT(${enable_joiner})
 AC_SUBST(OPENTHREAD_ENABLE_JOINER)
 AM_CONDITIONAL([OPENTHREAD_ENABLE_JOINER], [test "${enable_joiner}" = "yes"])
 AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_JOINER],[${OPENTHREAD_ENABLE_JOINER}],[Define to 1 to enable the joiner role.])
 
-if test "${enable_commissioner}" = "yes" -o "${enable_joiner}" = "yes"; then
+if test "${enable_commissioner}" = "yes" -o "${enable_joiner}" = "yes" -o "${enable_border_agent}" = "yes" -o "${enable_application_coap_secure}" = "yes"; then
     enable_dtls="yes"
     OPENTHREAD_ENABLE_DTLS=1
 else
@@ -527,6 +1026,7 @@ else
     OPENTHREAD_ENABLE_DTLS=0
 fi
 
+AC_MSG_CHECKING([whether to enable DTLS due to joiner/commissioner])
 AC_MSG_RESULT(${enable_dtls})
 AC_SUBST(OPENTHREAD_ENABLE_DTLS)
 AM_CONDITIONAL([OPENTHREAD_ENABLE_DTLS], [test "${enable_dtls}" = "yes"])
@@ -558,41 +1058,107 @@ else
     OPENTHREAD_ENABLE_JAM_DETECTION=0
 fi
 
+AC_MSG_CHECKING([whether to enable jam detection])
 AC_MSG_RESULT(${enable_jam_detection})
 AC_SUBST(OPENTHREAD_ENABLE_JAM_DETECTION)
 AM_CONDITIONAL([OPENTHREAD_ENABLE_JAM_DETECTION], [test "${enable_jam_detection}" = "yes"])
 AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_JAM_DETECTION],[${OPENTHREAD_ENABLE_JAM_DETECTION}],[Define to 1 if you want to use jam detection feature])
 
 #
-# MAC Whitelist and Blacklist
+# Channel Monitor
 #
 
-AC_ARG_ENABLE(mac_whitelist,
-    [AS_HELP_STRING([--enable-mac-whitelist],[Enable MAC whitelist/blacklist support @<:@default=yes@:>@.])],
+AC_ARG_ENABLE(channel_monitor,
+    [AS_HELP_STRING([--enable-channel-monitor],[Enable Channel Monitor support @<:@default=no@:>@.])],
     [
         case "${enableval}" in
 
         no|yes)
-            enable_mac_whitelist=${enableval}
+            enable_channel_monitor=${enableval}
             ;;
 
         *)
-            AC_MSG_ERROR([Invalid value ${enable_mac_whitelist} for --enable-mac-whitelist])
+            AC_MSG_ERROR([Invalid value ${enable_channel_monitor} for --enable-channel-monitor])
             ;;
         esac
     ],
-    [enable_mac_whitelist=yes])
+    [enable_channel_monitor=no])
 
-if test "$enable_mac_whitelist" = "yes"; then
-    OPENTHREAD_ENABLE_MAC_WHITELIST=1
+if test "$enable_channel_monitor" = "yes"; then
+    OPENTHREAD_ENABLE_CHANNEL_MONITOR=1
 else
-    OPENTHREAD_ENABLE_MAC_WHITELIST=0
+    OPENTHREAD_ENABLE_CHANNEL_MONITOR=0
 fi
 
-AC_MSG_RESULT(${enable_mac_whitelist})
-AC_SUBST(OPENTHREAD_ENABLE_MAC_WHITELIST)
-AM_CONDITIONAL([OPENTHREAD_ENABLE_MAC_WHITELIST], [test "${enable_mac_whitelist}" = "yes"])
-AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_MAC_WHITELIST],[${OPENTHREAD_ENABLE_MAC_WHITELIST}],[Define to 1 if you want to use MAC whitelist/blacklist feature])
+AC_MSG_CHECKING([whether to enable channel monitor])
+AC_MSG_RESULT(${enable_channel_monitor})
+AC_SUBST(OPENTHREAD_ENABLE_CHANNEL_MONITOR)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_CHANNEL_MONITOR], [test "${enable_channel_monitor}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_CHANNEL_MONITOR],[${OPENTHREAD_ENABLE_CHANNEL_MONITOR}],[Define to 1 if you want to use channel monitor feature])
+
+#
+# Channel Manager
+#
+
+AC_ARG_ENABLE(channel_manager,
+    [AS_HELP_STRING([--enable-channel-manager],[Enable Channel Manager support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_channel_manager=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_channel_manager} for --enable-channel-manager])
+            ;;
+        esac
+    ],
+    [enable_channel_manager=no])
+
+if test "$enable_channel_manager" = "yes"; then
+    OPENTHREAD_ENABLE_CHANNEL_MANAGER=1
+else
+    OPENTHREAD_ENABLE_CHANNEL_MANAGER=0
+fi
+
+AC_MSG_CHECKING([whether to enable channel manager])
+AC_MSG_RESULT(${enable_channel_manager})
+AC_SUBST(OPENTHREAD_ENABLE_CHANNEL_MANAGER)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_CHANNEL_MANAGER], [test "${enable_channel_manager}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_CHANNEL_MANAGER],[${OPENTHREAD_ENABLE_CHANNEL_MANAGER}],[Define to 1 if you want to enable channel manager feature])
+
+#
+# MAC Filter (include AddressFilter and RssInFilter)
+#
+
+AC_ARG_ENABLE(mac_filter,
+              [AS_HELP_STRING([--enable-mac-filter],[Enable MAC filter support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_mac_filter=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_mac_filter} for --enable-mac-filter])
+            ;;
+        esac
+    ],
+    [enable_mac_filter=no])
+
+if test "$enable_mac_filter" = "yes"; then
+    OPENTHREAD_ENABLE_MAC_FILTER=1
+else
+    OPENTHREAD_ENABLE_MAC_FILTER=0
+fi
+
+AC_MSG_CHECKING([whether to enable mac filter])
+AC_MSG_RESULT(${enable_mac_filter})
+AC_SUBST(OPENTHREAD_ENABLE_MAC_FILTER)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_MAC_FILTER], [test "${enable_mac_filter}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_MAC_FILTER],[${OPENTHREAD_ENABLE_MAC_FILTER}],[Define to 1 if you want to use MAC filter feature])
 
 #
 # Diagnostics Library
@@ -620,10 +1186,41 @@ else
     OPENTHREAD_ENABLE_DIAG=0
 fi
 
+AC_MSG_CHECKING([whether to enable diag])
 AC_MSG_RESULT(${enable_diag})
 AC_SUBST(OPENTHREAD_ENABLE_DIAG)
 AM_CONDITIONAL([OPENTHREAD_ENABLE_DIAG], [test "${enable_diag}" = "yes"])
 AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_DIAG],[${OPENTHREAD_ENABLE_DIAG}],[Define to 1 if you want to use diagnostics module])
+
+#
+# Vendor Extension - Specify a C++ source file which will be built as part of OpenThread core library.
+#
+
+AC_ARG_WITH(
+    [vendor-extension],
+    [AS_HELP_STRING([--with-vendor-extension=<VENDOR_EXT.CPP>],[Specify a C++ source file built as part of OpenThread core library. @<:@default=none@:>@.])],
+    [
+        if test "${withval}" = "no"
+        then OPENTHREAD_ENABLE_VENDOR_EXTENSION=0
+        elif test '!' -f "${withval}"
+        then AC_MSG_ERROR([Can't open ${withval} for --with-vendor-extension])
+        else
+            OPENTHREAD_ENABLE_VENDOR_EXTENSION=1
+
+            # Get the absolute path.
+            OPENTHREAD_VENDOR_EXTENSION_SOURCE=$(cd `dirname ${withval}` && pwd)/$(basename ${withval})
+        fi
+    ],
+    [
+        OPENTHREAD_ENABLE_VENDOR_EXTENSION=0
+        with_vendor_extension=none
+    ])
+
+AC_MSG_CHECKING([for vendor extension])
+AC_MSG_RESULT(${OPENTHREAD_VENDOR_EXTENSION_SOURCE-none})
+AC_SUBST(OPENTHREAD_VENDOR_EXTENSION_SOURCE)
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_VENDOR_EXTENSION],[${OPENTHREAD_ENABLE_VENDOR_EXTENSION}],[Define to 1 if using vendor extension])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_VENDOR_EXTENSION], [test "${OPENTHREAD_ENABLE_VENDOR_EXTENSION}" = "1"])
 
 #
 # Legacy Network
@@ -651,40 +1248,98 @@ else
     OPENTHREAD_ENABLE_LEGACY=0
 fi
 
+AC_MSG_CHECKING([whether to enable legacy])
 AC_MSG_RESULT(${enable_legacy})
 AC_SUBST(OPENTHREAD_ENABLE_LEGACY)
 AM_CONDITIONAL([OPENTHREAD_ENABLE_LEGACY], [test "${enable_legacy}" = "yes"])
 AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_LEGACY],[${OPENTHREAD_ENABLE_LEGACY}],[Define to 1 if you want to use legacy network support])
 
 #
-# Default Logging
+# NCP Vendor Hook Source - Specify a C++ file that implements the NCP vendor hook.
 #
 
-AC_ARG_ENABLE(default_logging,
-    [AS_HELP_STRING([--enable-default-logging],[Enable default logging support @<:@default=no@:>@.])],
+AC_ARG_WITH(
+    [ncp-vendor-hook-source],
+    [AS_HELP_STRING([--with-ncp-vendor-hook-source=<VENDOR_HOOK.CPP>],[Specify a C++ file that implements the NCP vendor hook. @<:@default=none@:>@.])],
+    [
+        if test "${withval}" = "no"
+        then OPENTHREAD_ENABLE_NCP_VENDOR_HOOK=0
+        elif test '!' -f "${withval}"
+        then AC_MSG_ERROR([Can't open ${withval} for --with-ncp-vendor-hook-source])
+        else
+            OPENTHREAD_ENABLE_NCP_VENDOR_HOOK=1
+
+            # Get the absolute path.
+            OPENTHREAD_NCP_VENDOR_HOOK_SOURCE=$(cd `dirname ${withval}` && pwd)/$(basename ${withval})
+        fi
+    ],
+    [
+        OPENTHREAD_ENABLE_NCP_VENDOR_HOOK=0
+        with_ncp_vendor_hook_source=none
+    ])
+
+AC_MSG_CHECKING([for NCP vendor hook source])
+AC_MSG_RESULT(${OPENTHREAD_NCP_VENDOR_HOOK_SOURCE-none})
+AC_SUBST(OPENTHREAD_NCP_VENDOR_HOOK_SOURCE)
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_NCP_VENDOR_HOOK],[${OPENTHREAD_ENABLE_NCP_VENDOR_HOOK}],[Define to 1 if using NCP vendor hook])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_VENDOR_HOOK], [test "${OPENTHREAD_ENABLE_NCP_VENDOR_HOOK}" = "1"])
+
+#
+# NCP Spinel Encrypter
+#
+
+AC_ARG_WITH(
+    [ncp-spinel-encrypter-libs],
+    [AS_HELP_STRING([--with-ncp-spinel-encrypter-libs=<LIBSPINEL_ENCRYPTER.A>],[Specify library files (absolute paths) implementing the NCP Spinel Encrypter. @<:@default=none@:>@.])],
+    [
+        if test "${withval}" = "no"
+        then OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER=0
+        else
+            OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER=1
+            OPENTHREAD_NCP_SPINEL_ENCRYPTER_LIBS=${withval}
+        fi
+    ],
+    [
+        OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER=0
+        with_ncp_spinel_encrypter_libs=none
+    ])
+
+AC_MSG_CHECKING([for NCP Spinel Encrypter])
+AC_MSG_RESULT(${OPENTHREAD_NCP_SPINEL_ENCRYPTER_LIBS-none})
+AC_SUBST(OPENTHREAD_NCP_SPINEL_ENCRYPTER_LIBS)
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER],[${OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER}],[Define to 1 if using NCP Spinel Encrypter])
+AM_CONDITIONAL([OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER], [test "${OPENTHREAD_ENABLE_NCP_SPINEL_ENCRYPTER}" = "1"])
+
+#
+# Child Supervision
+#
+
+AC_ARG_ENABLE(child_supervision,
+    [AS_HELP_STRING([--enable-child-supervision],[Enable child supervision feature @<:@default=no@:>@.])],
     [
         case "${enableval}" in
 
         no|yes)
-            enable_default_logging=${enableval}
+            enable_child_supervision=${enableval}
             ;;
 
         *)
-            AC_MSG_ERROR([Invalid value ${enable_default_logging} for --enable-default-logging])
+            AC_MSG_ERROR([Invalid value ${enable_child_supervision} for --enable-child-supervision])
             ;;
         esac
     ],
-    [enable_default_logging=no])
+    [enable_child_supervision=no])
 
-if test "$enable_default_logging" = "yes"; then
-    OPENTHREAD_ENABLE_DEFAULT_LOGGING=1
+if test "$enable_child_supervision" = "yes"; then
+    OPENTHREAD_ENABLE_CHILD_SUPERVISION=1
 else
-    OPENTHREAD_ENABLE_DEFAULT_LOGGING=0
+    OPENTHREAD_ENABLE_CHILD_SUPERVISION=0
 fi
 
-AC_SUBST(OPENTHREAD_ENABLE_DEFAULT_LOGGING)
-AM_CONDITIONAL([OPENTHREAD_ENABLE_DEFAULT_LOGGING], [test "${enable_default_logging}" = "yes"])
-AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_DEFAULT_LOGGING],[${OPENTHREAD_ENABLE_DEFAULT_LOGGING}],[Define to 1 if you want to enable default logging])
+AC_MSG_RESULT(${enable_child_supervision})
+AC_SUBST(OPENTHREAD_ENABLE_CHILD_SUPERVISION)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_CHILD_SUPERVISION], [test "${enable_child_supervision}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_CHILD_SUPERVISION],[${OPENTHREAD_ENABLE_CHILD_SUPERVISION}],[Define to 1 if you want to use child supervision feature])
 
 #
 # Log for certification test
@@ -777,6 +1432,66 @@ AM_CONDITIONAL([OPENTHREAD_ENABLE_DHCP6_SERVER], [test "${enable_dhcp6_server}" 
 AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_DHCP6_SERVER],[${OPENTHREAD_ENABLE_DHCP6_SERVER}],[Define to 1 if you want to enable DHCPv6 Server])
 
 #
+# DNS Client
+#
+
+AC_ARG_ENABLE(dns_client,
+    [AS_HELP_STRING([--enable-dns-client],[Enable DNS client support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_dns_client=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_dns_client} for --enable-dns-client])
+            ;;
+        esac
+    ],
+    [enable_dns_client=no])
+
+if test "$enable_dns_client" = "yes"; then
+    OPENTHREAD_ENABLE_DNS_CLIENT=1
+else
+    OPENTHREAD_ENABLE_DNS_CLIENT=0
+fi
+
+AC_SUBST(OPENTHREAD_ENABLE_DNS_CLIENT)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_DNS_CLIENT], [test "${enable_dns_client}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_DNS_CLIENT],[${OPENTHREAD_ENABLE_DNS_CLIENT}],[Define to 1 if you want to enable DNS Client])
+
+#
+# SNTP Client
+#
+
+AC_ARG_ENABLE(sntp_client,
+    [AS_HELP_STRING([--enable-sntp-client],[Enable SNTP client support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_sntp_client=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_sntp_client} for --enable-sntp-client])
+            ;;
+        esac
+    ],
+    [enable_sntp_client=no])
+
+if test "$enable_sntp_client" = "yes"; then
+    OPENTHREAD_ENABLE_SNTP_CLIENT=1
+else
+    OPENTHREAD_ENABLE_SNTP_CLIENT=0
+fi
+
+AC_SUBST(OPENTHREAD_ENABLE_SNTP_CLIENT)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_SNTP_CLIENT], [test "${enable_sntp_client}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_SNTP_CLIENT],[${OPENTHREAD_ENABLE_SNTP_CLIENT}],[Define to 1 if you want to enable SNTP Client])
+
+#
 # Application CoAP
 #
 
@@ -807,16 +1522,184 @@ AM_CONDITIONAL([OPENTHREAD_ENABLE_APPLICATION_COAP], [test "${enable_application
 AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_APPLICATION_COAP],[${OPENTHREAD_ENABLE_APPLICATION_COAP}],[Define to 1 if you want to enable CoAP to an application.])
 
 #
+# otLinkRaw API
+#
+
+AC_ARG_ENABLE(raw_link_api,
+    [AS_HELP_STRING([--enable-raw-link-api],[Enable raw link-layer API support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_raw_link_api=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_raw_link_api} for --enable-raw-link-api])
+            ;;
+        esac
+    ],
+    [enable_raw_link_api=no])
+
+if test "$enable_raw_link_api" = "yes"; then
+    OPENTHREAD_ENABLE_RAW_LINK_API=1
+else
+    OPENTHREAD_ENABLE_RAW_LINK_API=0
+fi
+
+AC_SUBST(OPENTHREAD_ENABLE_RAW_LINK_API)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_RAW_LINK_API], [test "${enable_raw_link_api}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_RAW_LINK_API],[${OPENTHREAD_ENABLE_RAW_LINK_API}],[Define to 1 if you want to enable raw link-layer API])
+
+#
+# Border Router
+#
+
+AC_ARG_ENABLE(border_router,
+    [AS_HELP_STRING([--enable-border-router],[Enable Border Router support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_border_router=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_border_router} for --enable-border-router])
+            ;;
+        esac
+    ],
+    [enable_border_router=no])
+
+if test "$enable_border_router" = "yes"; then
+    OPENTHREAD_ENABLE_BORDER_ROUTER=1
+else
+    OPENTHREAD_ENABLE_BORDER_ROUTER=0
+fi
+
+AC_SUBST(OPENTHREAD_ENABLE_BORDER_ROUTER)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_BORDER_ROUTER], [test "${enable_border_router}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_BORDER_ROUTER],[${OPENTHREAD_ENABLE_BORDER_ROUTER}],[Define to 1 if you want to enable Border Router])
+
+#
+# Service
+#
+
+AC_ARG_ENABLE(service,
+    [AS_HELP_STRING([--enable-service],[Enable Service @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_service=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_service} for --enable-service])
+            ;;
+        esac
+    ],
+    [enable_service=no])
+
+if test "$enable_service" = "yes"; then
+    OPENTHREAD_ENABLE_SERVICE=1
+else
+    OPENTHREAD_ENABLE_SERVICE=0
+fi
+
+AC_SUBST(OPENTHREAD_ENABLE_SERVICE)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_SERVICE], [test "${enable_service}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_SERVICE],[${OPENTHREAD_ENABLE_SERVICE}],[Define to 1 if you want to enable Service])
+
+#
+# Linker Map Output
+#
+
+AC_ARG_ENABLE(linker-map,
+    [AS_HELP_STRING([--enable-linker-map],[Enable linker map output @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_linker_map=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_linker_map} for --enable-linker-map])
+            ;;
+        esac
+    ],
+    [enable_linker_map=no])
+
+AC_MSG_CHECKING([whether to enable linker map output])
+AC_MSG_RESULT(${enable_linker_map})
+AM_CONDITIONAL([OPENTHREAD_ENABLE_LINKER_MAP], [test "${enable_linker_map}" = "yes"])
+
+#
+# Custom linker file
+#
+
+AC_ARG_WITH(
+    [custom-linker-file],
+    [AS_HELP_STRING([--with-custom-linker-file=<linkerfile.ld>],[Specify custom linker file (absolute path). @<:@default=none@:>@.])],
+    [
+        with_custom_linker_file=yes
+        OPENTHREAD_CUSTOM_LINKER_FILE=${withval}
+    ],
+    [
+        with_custom_linker_file=no
+    ])
+
+AC_SUBST(OPENTHREAD_CUSTOM_LINKER_FILE)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_CUSTOM_LINKER_FILE], [test "${with_custom_linker_file}" = "yes"])
+
+#
+# Support for ECDSA
+#
+
+AC_MSG_CHECKING([whether to build with ECDSA support])
+AC_ARG_ENABLE(ecdsa,
+    [AS_HELP_STRING([--enable-ecdsa], [Enable ECDSA support @<:@default=no@:>@.])],
+    [
+        case "${enableval}" in
+
+        no|yes)
+            enable_ecdsa=${enableval}
+            ;;
+
+        *)
+            AC_MSG_ERROR([Invalid value ${enable_ecdsa} for --enable-ecdsa])
+            ;;
+        esac
+    ],
+    [enable_ecdsa=no])
+
+if test "$enable_ecdsa" = "yes"; then
+    OPENTHREAD_ENABLE_ECDSA=1
+else
+    OPENTHREAD_ENABLE_ECDSA=0
+fi
+
+AC_MSG_RESULT(${enable_ecdsa})
+AC_SUBST(OPENTHREAD_ENABLE_ECDSA)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_ECDSA], [test "${enable_ecdsa}" = "yes"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_ECDSA], [${OPENTHREAD_ENABLE_ECDSA}], [Define to 1 if you want to enable ECDSA support])
+
+#
 # Examples
 #
 
 AC_ARG_WITH(examples,
     [AS_HELP_STRING([--with-examples=TARGET],
-        [Specify the examples from one of: none, posix, cc2538, da15000 @<:@default=none@:>@.])],
+        [Specify the examples from one of: none, posix, cc1352, cc2538, cc2650, cc2652, efr32mg12, efr32mg21, emsk, gp712, kw41z, nrf52811, nrf52840, qpg6095, samr21 @<:@default=none@:>@.])],
     [
         case "${with_examples}" in
-
-        none|posix|cc2538|da15000)
+        none)
+            ;;
+        posix|cc1352|cc2538|cc2650|cc2652|efr32mg12|efr32mg21|emsk|gp712|kw41z|nrf52811|nrf52840|qpg6095|samr21)
+            if test ${enable_posix_app} = "yes"; then
+                AC_MSG_ERROR([--with-examples must be none when POSIX apps are enabled by --enable-posix-app])
+            fi
             ;;
         *)
             AC_MSG_ERROR([Invalid value ${with_examples} for --with-examples])
@@ -825,7 +1708,7 @@ AC_ARG_WITH(examples,
     ],
     [with_examples=none])
 
-OPENTHREAD_EXAMPLES=${with_examples}
+OPENTHREAD_ENABLE_EXAMPLES=${with_examples}
 
 case ${with_examples} in
 
@@ -834,51 +1717,121 @@ case ${with_examples} in
         AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_POSIX],[${OPENTHREAD_EXAMPLES_POSIX}],[Define to 1 if you want to use posix examples])
         ;;
 
+    cc1352)
+        OPENTHREAD_EXAMPLES_CC1352=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_CC1352],[${OPENTHREAD_EXAMPLES_CC1352}],[Define to 1 if you want to use cc1352 examples])
+        ;;
+
     cc2538)
         OPENTHREAD_EXAMPLES_CC2538=1
         AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_CC2538],[${OPENTHREAD_EXAMPLES_CC2538}],[Define to 1 if you want to use cc2538 examples])
         ;;
 
-    da15000)
-        OPENTHREAD_EXAMPLES_DA15000=1
-        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_DA15000],[${OPENTHREAD_EXAMPLES_DA15000}],[Define to 1 if you want to use da15000 examples])
+    cc2650)
+        OPENTHREAD_EXAMPLES_CC2650=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_CC2650],[${OPENTHREAD_EXAMPLES_CC2650}],[Define to 1 if you want to use cc2650 examples])
+        ;;
+
+    cc2652)
+        OPENTHREAD_EXAMPLES_CC2652=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_CC2652],[${OPENTHREAD_EXAMPLES_CC2652}],[Define to 1 if you want to use cc2652 examples])
+        ;;
+
+    efr32mg12)
+        OPENTHREAD_EXAMPLES_EFR32MG12=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_EFR32MG12],[${OPENTHREAD_EXAMPLES_EFR32MG12}],[Define to 1 if you want to use efr32mg12 examples])
+        ;;
+
+    efr32mg21)
+        OPENTHREAD_EXAMPLES_EFR32MG21=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_EFR32MG21],[${OPENTHREAD_EXAMPLES_EFR32MG21}],[Define to 1 if you want to use efr32mg21 examples])
+        ;;
+
+     emsk)
+        OPENTHREAD_EXAMPLES_EMSK=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_EMSK],[${OPENTHREAD_EXAMPLES_EMSK}],[Define to 1 if you want to use emsk examples])
+        ;;
+
+    gp712)
+        OPENTHREAD_EXAMPLES_GP712=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_GP712],[${OPENTHREAD_EXAMPLES_GP712}],[Define to 1 if you want to use gp712 examples])
+        ;;
+
+    kw41z)
+        OPENTHREAD_EXAMPLES_KW41Z=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_KW41Z],[${OPENTHREAD_EXAMPLES_KW41Z}],[Define to 1 if you want to use kw41z examples])
+        ;;
+
+    nrf52811)
+        OPENTHREAD_EXAMPLES_NRF52811=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_NRF52811],[${OPENTHREAD_EXAMPLES_NRF52811}],[Define to 1 if you want to use nrf52811 examples])
+        ;;
+
+    nrf52840)
+        OPENTHREAD_EXAMPLES_NRF52840=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_NRF52840],[${OPENTHREAD_EXAMPLES_NRF52840}],[Define to 1 if you want to use nrf52840 examples])
+        ;;
+
+    qpg6095)
+        OPENTHREAD_EXAMPLES_QPG6095=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_QPG6095],[${OPENTHREAD_EXAMPLES_QPG6095}],[Define to 1 if you want to use qpg6095 examples])
+        ;;
+
+    samr21)
+        OPENTHREAD_EXAMPLES_SAMR21=1
+        AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES_SAMR21],[${OPENTHREAD_EXAMPLES_SAMR21}],[Define to 1 if you want to use samr21 examples])
         ;;
 
 esac
 
+AC_MSG_CHECKING([whether to enable examples])
 AC_MSG_RESULT(${OPENTHREAD_EXAMPLES})
 
-AC_SUBST(OPENTHREAD_EXAMPLES)
-AM_CONDITIONAL([OPENTHREAD_EXAMPLES], [test ${with_examples} != "none"])
-AC_DEFINE_UNQUOTED([OPENTHREAD_EXAMPLES],[${OPENTHREAD_EXAMPLES}],[OpenThread examples])
+AC_SUBST(OPENTHREAD_ENABLE_EXAMPLES)
+AM_CONDITIONAL([OPENTHREAD_ENABLE_EXAMPLES], [test ${with_examples} != "none"])
+AC_DEFINE_UNQUOTED([OPENTHREAD_ENABLE_EXAMPLES],[${OPENTHREAD_ENABLE_EXAMPLES}],[OpenThread examples])
 
 AC_SUBST(OPENTHREAD_EXAMPLES_POSIX)
-AM_CONDITIONAL([OPENTHREAD_EXAMPLES_POSIX], [test "${OPENTHREAD_EXAMPLES}" = "posix"])
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_POSIX], [test "${with_examples}" = "posix"])
+
+AC_SUBST(OPENTHREAD_EXAMPLES_CC1352)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_CC1352], [test "${with_examples}" = "cc1352"])
 
 AC_SUBST(OPENTHREAD_EXAMPLES_CC2538)
-AM_CONDITIONAL([OPENTHREAD_EXAMPLES_CC2538], [test "${OPENTHREAD_EXAMPLES}" = "cc2538"])
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_CC2538], [test "${with_examples}" = "cc2538"])
 
-AC_SUBST(OPENTHREAD_EXAMPLES_DA15000)
-AM_CONDITIONAL([OPENTHREAD_EXAMPLES_DA15000], [test "${OPENTHREAD_EXAMPLES}" = "da15000"])
+AC_SUBST(OPENTHREAD_EXAMPLES_CC2650)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_CC2650], [test "${with_examples}" = "cc2650"])
 
-#
-# Platform Information
-#
+AC_SUBST(OPENTHREAD_EXAMPLES_CC2652)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_CC2652], [test "${with_examples}" = "cc2652"])
 
-AC_ARG_WITH(platform-info,
-    [AS_HELP_STRING([--with-platform-info=PLATFORM],
-        [Specify the platform information @<:@default=none@:>@.])],
-    [],
-    [with_platform_info=none])
+AC_SUBST(OPENTHREAD_EXAMPLES_EFR32MG12)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_EFR32MG12], [test "${with_examples}" = "efr32mg12"])
 
-PLATFORM_INFO=${with_platform_info}
+AC_SUBST(OPENTHREAD_EXAMPLES_EFR32MG21)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_EFR32MG21], [test "${with_examples}" = "efr32mg21"])
 
-AC_MSG_RESULT(${PLATFORM_INFO})
+AC_SUBST(OPENTHREAD_EXAMPLES_EMSK)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_EMSK], [test "${with_examples}" = "emsk"])
 
-if test "$PLATFORM_INFO" != "none"; then
-    AC_SUBST(PLATFORM_INFO)
-    AC_DEFINE_UNQUOTED([PLATFORM_INFO],["${PLATFORM_INFO}"],[OpenThread platform information])
-fi
+AC_SUBST(OPENTHREAD_EXAMPLES_GP712)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_GP712], [test "${with_examples}" = "gp712"])
+
+AC_SUBST(OPENTHREAD_EXAMPLES_KW41Z)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_KW41Z], [test "${with_examples}" = "kw41z"])
+
+AC_SUBST(OPENTHREAD_EXAMPLES_NRF52811)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_NRF52811], [test "${with_examples}" = "nrf52811"])
+
+AC_SUBST(OPENTHREAD_EXAMPLES_NRF52840)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_NRF52840], [test "${with_examples}" = "nrf52840"])
+
+AC_SUBST(OPENTHREAD_EXAMPLES_QPG6095)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_QPG6095], [test "${with_examples}" = "qpg6095"])
+
+AC_SUBST(OPENTHREAD_EXAMPLES_SAMR21)
+AM_CONDITIONAL([OPENTHREAD_EXAMPLES_SAMR21], [test "${with_examples}" = "samr21"])
 
 #
 # Tools
@@ -916,6 +1869,8 @@ NL_ENABLE_DOCS([auto],[NO])
 
 AM_CONDITIONAL(OPENTHREAD_BUILD_DOCS, [test "${nl_cv_build_docs}" = "yes"])
 
+AM_CONDITIONAL(OPENTHREAD_POSIX, [test "${OPENTHREAD_PLATFORM_POSIX_APP}" = "1" -o "${OPENTHREAD_EXAMPLES_POSIX}" = "1"])
+
 #
 # Checks for libraries and packages.
 #
@@ -931,11 +1886,37 @@ AC_MSG_NOTICE([checking required package dependencies])
 #
 # Check for headers
 #
+
+#---------------------------------------------------
+# Enable BSD Security Features
+# This enables strlcpy() and other friends in GNU land.
+# While the references below generally speak of: "glibc"
+# The ARM Embedded platform uses the nano instance of NEWLIB
+# Which greatly follows and mirrors glibc.
+# --------------------------------------------------
+#
+# References:
+# 1) http://stackoverflow.com/questions/29201515/what-does-d-default-source-do
+# 2) http://man7.org/linux/man-pages/man7/feature_test_macros.7.html
+#
+CFLAGS="${CFLAGS} -D_BSD_SOURCE=1 -D_DEFAULT_SOURCE=1"
+CXXFLAGS="${CXXFLAGS} -D_BSD_SOURCE=1 -D_DEFAULT_SOURCE=1"
+
+OLD_CFLAGS="${CFLAGS}"
+CFLAGS="${CFLAGS} -Wno-error=address"
 AC_HEADER_STDBOOL
+CFLAGS="${OLD_CFLAGS}"
 AC_HEADER_STDC
 
 AC_CHECK_HEADERS([stdint.h])
 AC_CHECK_HEADERS([string.h])
+
+#
+# Missing Functions
+#
+AC_CHECK_FUNC([strlcpy], [AC_DEFINE([HAVE_STRLCPY], [1], [Define if strlcpy exists.])])
+AC_CHECK_FUNC([strlcat], [AC_DEFINE([HAVE_STRLCAT], [1], [Define if strlcat exists.])])
+AC_CHECK_FUNC([strnlen], [AC_DEFINE([HAVE_STRNLEN], [1], [Define if strnlen exists.])])
 
 #
 # Check for types and structures
@@ -964,6 +1945,7 @@ CPPFLAGS="${CPPFLAGS} ${MBEDTLS_CPPFLAGS}"
 # Add any code coverage CPPFLAGS and LDFLAGS
 
 CPPFLAGS="${CPPFLAGS} ${NL_COVERAGE_CPPFLAGS}"
+LIBS="${LIBS} ${NL_COVERAGE_LIBS}"
 LDFLAGS="${LDFLAGS} ${NL_COVERAGE_LDFLAGS}"
 
 # At this point, we can restore the compiler flags to whatever the
@@ -978,35 +1960,51 @@ NL_RESTORE_WERROR
 AC_CONFIG_FILES([
 Makefile
 include/Makefile
-include/cli/Makefile
-include/commissioning/Makefile
-include/dhcp6/Makefile
-include/ncp/Makefile
-include/platform/Makefile
+include/openthread/Makefile
+include/openthread/platform/Makefile
 src/Makefile
 src/cli/Makefile
 src/ncp/Makefile
 src/core/Makefile
 src/diag/Makefile
+src/posix/Makefile
+src/posix/platform/Makefile
 third_party/Makefile
+third_party/jlink/Makefile
 third_party/mbedtls/Makefile
+third_party/NordicSemiconductor/Makefile
+third_party/silabs/Makefile
 examples/Makefile
 examples/apps/Makefile
 examples/apps/cli/Makefile
 examples/apps/ncp/Makefile
 examples/platforms/Makefile
+examples/platforms/cc1352/Makefile
 examples/platforms/cc2538/Makefile
-examples/platforms/da15000/Makefile
+examples/platforms/cc2650/Makefile
+examples/platforms/cc2652/Makefile
+examples/platforms/efr32mg12/Makefile
+examples/platforms/efr32mg12/sleepy-demo/Makefile
+examples/platforms/efr32mg12/sleepy-demo/sleepy-demo-ftd/Makefile
+examples/platforms/efr32mg12/sleepy-demo/sleepy-demo-mtd/Makefile
+examples/platforms/efr32mg21/Makefile
+examples/platforms/emsk/Makefile
+examples/platforms/gp712/Makefile
+examples/platforms/kw41z/Makefile
+examples/platforms/nrf52811/Makefile
+examples/platforms/nrf52840/Makefile
+examples/platforms/qpg6095/Makefile
+examples/platforms/samr21/Makefile
 examples/platforms/posix/Makefile
 examples/platforms/utils/Makefile
 tools/Makefile
 tools/harness-automation/Makefile
 tools/harness-thci/Makefile
 tools/spi-hdlc-adapter/Makefile
-tools/spinel-cli/Makefile
-tools/spinel-cli/spinel/Makefile
 tests/Makefile
+tests/fuzz/Makefile
 tests/scripts/Makefile
+tests/scripts/thread-cert/Makefile
 tests/unit/Makefile
 doc/Makefile
 ])
@@ -1029,9 +2027,8 @@ AC_MSG_NOTICE([
   Interface                                 : ${LIBOPENTHREAD_VERSION_INFO//:/.}
   Build system                              : ${build}
   Host system                               : ${host}
-  Target system                             : ${target}
-  Target architecture                       : ${target_cpu}
-  Target OS                                 : ${target_os}
+  Host architecture                         : ${host_cpu}
+  Host OS                                   : ${host_os}
   Cross compiling                           : ${cross_compiling}
   Build shared libraries                    : ${enable_shared}
   Build static libraries                    : ${enable_static}
@@ -1039,9 +2036,11 @@ AC_MSG_NOTICE([
   Build optimized libraries                 : ${nl_cv_build_optimized}
   Build coverage libraries                  : ${nl_cv_build_coverage}
   Build coverage reports                    : ${nl_cv_build_coverage_reports}
+  Address sanitizer support                 : ${enable_address_sanitizer}
   Lcov                                      : ${LCOV:--}
   Genhtml                                   : ${GENHTML:--}
   Build tests                               : ${nl_cv_build_tests}
+  Build fuzz targets                        : ${enable_fuzz_targets}
   Build tools                               : ${build_tools}
   OpenThread tests                          : ${with_tests}
   Prefix                                    : ${prefix}
@@ -1052,6 +2051,7 @@ AC_MSG_NOTICE([
   C Compiler                                : ${CC}
   C++ Preprocessor                          : ${CXXCPP}
   C++ Compiler                              : ${CXX}
+  Assembler Compiler                        : ${CCAS}
   Archiver                                  : ${AR}
   Archive Indexer                           : ${RANLIB}
   Symbol Stripper                           : ${STRIP}
@@ -1059,28 +2059,50 @@ AC_MSG_NOTICE([
   C Preprocessor flags                      : ${CPPFLAGS:--}
   C Compile flags                           : ${CFLAGS:--}
   C++ Compile flags                         : ${CXXFLAGS:--}
+  Assembler flags                           : ${CCASFLAGS:--}
   Link flags                                : ${LDFLAGS:--}
   Link libraries                            : ${LIBS}
+  Link maps                                 : ${enable_linker_map}
   Pretty                                    : ${PRETTY:--}
   Pretty args                               : ${PRETTY_ARGS:--}
   Pretty check                              : ${PRETTY_CHECK:--}
   Pretty check args                         : ${PRETTY_CHECK_ARGS:--}
+  OpenThread FTD support                    : ${enable_ftd}
+  OpenThread MTD support                    : ${enable_mtd}
+  OpenThread Radio Only support             : ${enable_radio_only}
   OpenThread CLI support                    : ${enable_cli}
   OpenThread NCP support                    : ${enable_ncp}
+  OpenThread NCP-BUS Configuration          : ${with_ncp_bus}
+  OpenThread NCP Vendor Hook Source         : ${with_ncp_vendor_hook_source}
+  OpenThread NCP Spinel Encrypter           : ${with_ncp_spinel_encrypter_libs}
+  OpenThread Vendor Extension Source        : ${with_vendor_extension}
+  OpenThread Multiple Instances support     : ${enable_multiple_instances}
+  OpenThread MTD Network Diagnostic support : ${enable_mtd_network_diagnostic}
   OpenThread builtin mbedtls support        : ${enable_builtin_mbedtls}
+  OpenThread UDP forward support            : ${enable_udp_forward}
   OpenThread Commissioner support           : ${enable_commissioner}
   OpenThread Joiner support                 : ${enable_joiner}
   OpenThread DTLS support                   : ${enable_dtls}
   OpenThread Jam Detection support          : ${enable_jam_detection}
-  OpenThread MAC Whitelist support          : ${enable_mac_whitelist}
+  OpenThread Channel Monitor support        : ${enable_channel_monitor}
+  OpenThread Channel Manager support        : ${enable_channel_manager}
+  OpenThread MAC Filter support             : ${enable_mac_filter}
   OpenThread Diagnostics support            : ${enable_diag}
+  OpenThread Child Supervision support      : ${enable_child_supervision}
   OpenThread Legacy network support         : ${enable_legacy}
-  OpenThread Default logging support        : ${enable_default_logging}
   OpenThread Certification log support      : ${enable_cert_log}
   OpenThread DHCPv6 Server support          : ${enable_dhcp6_server}
   OpenThread DHCPv6 Client support          : ${enable_dhcp6_client}
-  Openthread Application CoAP support       : ${enable_application_coap}
-  OpenThread examples                       : ${OPENTHREAD_EXAMPLES}
-  OpenThread platform information           : ${PLATFORM_INFO}
+  OpenThread DNS Client support             : ${enable_dns_client}
+  OpenThread SNTP Client support            : ${enable_sntp_client}
+  OpenThread Application CoAP support       : ${enable_application_coap}
+  OpenThread Application CoAP Secure support: ${enable_application_coap_secure}
+  OpenThread Raw Link-Layer support         : ${enable_raw_link_api}
+  OpenThread Border Agent support           : ${enable_border_agent}
+  OpenThread Border Router support          : ${enable_border_router}
+  OpenThread Service support                : ${enable_service}
+  OpenThread ECDSA support                  : ${enable_ecdsa}
+  OpenThread Examples                       : ${with_examples}
+  OpenThread POSIX Application              : ${enable_posix_app}
 
 ])

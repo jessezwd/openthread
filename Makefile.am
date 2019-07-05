@@ -31,20 +31,32 @@ include $(abs_top_nlbuild_autotools_dir)/automake/pre.am
 AM_MAKEFLAGS                        = --no-print-directory
 
 AM_DISTCHECK_CONFIGURE_FLAGS        = \
+    --enable-address-sanitizer        \
+    --enable-application-coap         \
+    --enable-application-coap-secure  \
+    --enable-border-router            \
+    --enable-cert-log                 \
     --enable-cli                      \
-    --enable-ncp                      \
-    --enable-diag                     \
-    --with-examples=posix             \
     --enable-commissioner             \
-    --enable-joiner                   \
     --enable-dhcp6-client             \
     --enable-dhcp6-server             \
+    --enable-diag                     \
+    --enable-dns-client               \
+    --enable-ftd                      \
+    --enable-joiner                   \
+    --enable-mac-filter               \
+    --enable-mtd                      \
+    --enable-ncp                      \
+    --with-ncp-bus=uart               \
+    --enable-radio-only               \
+    --enable-service                  \
+    --with-examples=posix             \
     $(NULL)
 
 SUBDIRS                             = \
     include                           \
-    src                               \
     third_party                       \
+    src                               \
     examples                          \
     tests                             \
     tools                             \
@@ -52,8 +64,6 @@ SUBDIRS                             = \
     $(NULL)
 
 EXTRA_DIST                          = \
-    .astyle/astyle-opts               \
-    .astyle/astyle-wrap.sh            \
     .default-version                  \
     bootstrap                         \
     etc                               \

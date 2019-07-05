@@ -32,10 +32,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include <openthread-types.h>
-
-#ifndef _WIN32
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -43,57 +39,39 @@ extern "C" {
 // Enable main functions
 #define ENABLE_TEST_MAIN
 
-#define SuccessOrQuit(ERR, MSG)                 \
-  do { \
-    if ((ERR) != kThreadError_None)     \
-    { \
-      fprintf(stderr, "%s FAILED: ", __FUNCTION__); \
-      fputs(MSG, stderr); \
-      exit(-1); \
-    } \
-  } while (0)
+#define SuccessOrQuit(ERR, MSG)                                                    \
+    do                                                                             \
+    {                                                                              \
+        if ((ERR) != OT_ERROR_NONE)                                                \
+        {                                                                          \
+            fprintf(stderr, "\nFAILED %s:%d - %s\n", __FUNCTION__, __LINE__, MSG); \
+            exit(-1);                                                              \
+        }                                                                          \
+    } while (false)
 
-#define VerifyOrQuit(TST, MSG) \
-  do { \
-    if (!(TST)) \
-    { \
-      fprintf(stderr, "%s FAILED: ", __FUNCTION__); \
-      fputs(MSG, stderr); \
-      exit(-1); \
-    } \
-  } while (0)
+#define VerifyOrQuit(TST, MSG)                                                     \
+    do                                                                             \
+    {                                                                              \
+        if (!(TST))                                                                \
+        {                                                                          \
+            fprintf(stderr, "\nFAILED %s:%d - %s\n", __FUNCTION__, __LINE__, MSG); \
+            exit(-1);                                                              \
+        }                                                                          \
+    } while (false)
 
 //#define CompileTimeAssert(COND, MSG) typedef char __C_ASSERT__[(COND)?1:-1]
 
 // I would use the above definition for CompileTimeAssert, but I am getting the following errors
 // when I run 'make -f examples/Makefile-posix distcheck':
 //
-//      error: typedef ‘__C_ASSERT__’ locally defined but not used [-Werror=unused-local-typedefs]
+//      error: typedef "__C_ASSERT__" locally defined but not used [-Werror=unused-local-typedefs]
 //
 #define CompileTimeAssert(COND, MSG)
 
-#define Log(aFormat, ...) printf(aFormat "\n", ## __VA_ARGS__)
+#define Log(aFormat, ...) printf(aFormat "\n", ##__VA_ARGS__)
 
 #ifdef __cplusplus
 }
-#endif
-
-#else
-
-typedef void (*utAssertTrue)(bool condition, const wchar_t *message);
-extern utAssertTrue s_AssertTrue;
-
-typedef void (*utLogMessage)(const char *format, ...);
-extern utLogMessage s_LogMessage;
-
-#define SuccessOrQuit(ERR, MSG) s_AssertTrue((ERR) == kThreadError_None, L##MSG)
-
-#define VerifyOrQuit(ERR, MSG) s_AssertTrue(ERR, L##MSG)
-
-#define CompileTimeAssert(COND, MSG) static_assert(COND, MSG)
-
-#define Log(aFormat, ...) s_LogMessage(aFormat, ## __VA_ARGS__)
-
 #endif
 
 #endif

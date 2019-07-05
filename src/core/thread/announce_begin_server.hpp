@@ -34,39 +34,38 @@
 #ifndef ANNOUNCE_BEGIN_SERVER_HPP_
 #define ANNOUNCE_BEGIN_SERVER_HPP_
 
-#include <openthread-core-config.h>
-#include <openthread-types.h>
-#include <coap/coap_client.hpp>
-#include <coap/coap_server.hpp>
-#include <common/timer.hpp>
-#include <net/ip6_address.hpp>
+#include "openthread-core-config.h"
 
-namespace Thread {
+#include "coap/coap.hpp"
+#include "common/locator.hpp"
+#include "common/timer.hpp"
+#include "net/ip6_address.hpp"
+#include "thread/announce_sender.hpp"
 
-class ThreadNetif;
+namespace ot {
 
 /**
  * This class implements handling Announce Begin Requests.
  *
  */
-class AnnounceBeginServer
+class AnnounceBeginServer : public AnnounceSenderBase
 {
 public:
     /**
      * This constructor initializes the object.
      *
      */
-    AnnounceBeginServer(ThreadNetif &aThreadNetif);
+    explicit AnnounceBeginServer(Instance &aInstance);
 
     /**
      * This method begins the MLE Announce transmission process using Count=3 and Period=1s.
      *
      * @param[in]  aChannelMask   The channels to use for transmission.
      *
-     * @retval kThreadError_None  Successfully started the transmission process.
+     * @retval OT_ERROR_NONE  Successfully started the transmission process.
      *
      */
-    ThreadError SendAnnounce(uint32_t aChannelMask);
+    otError SendAnnounce(uint32_t aChannelMask);
 
     /**
      * This method begins the MLE Announce transmission process.
@@ -75,43 +74,31 @@ public:
      * @param[in]  aCount         The number of transmissions per channel.
      * @param[in]  aPeriod        The time between transmissions (milliseconds).
      *
-     * @retval kThreadError_None  Successfully started the transmission process.
+     * @retval OT_ERROR_NONE  Successfully started the transmission process.
      *
      */
-    ThreadError SendAnnounce(uint32_t aChannelMask, uint8_t aCount, uint16_t aPeriod);
+    otError SendAnnounce(uint32_t aChannelMask, uint8_t aCount, uint16_t aPeriod);
 
 private:
     enum
     {
         kDefaultCount  = 3,
         kDefaultPeriod = 1000,
+        kDefaultJitter = 0,
     };
 
-    static void HandleRequest(void *aContext, otCoapHeader *aHeader, otMessage aMessage,
-                              const otMessageInfo *aMessageInfo);
-    void HandleRequest(Coap::Header &aHeader, Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
+    static void HandleRequest(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
+    void        HandleRequest(Coap::Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
 
-    ThreadError SendResponse(const Coap::Header &aRequestHeader, const Ip6::MessageInfo &aRequestMessageInfo);
-
-    static void HandleTimer(void *aContext);
-    void HandleTimer(void);
-
-    uint32_t mChannelMask;
-    uint16_t mPeriod;
-    uint8_t mCount;
-    uint8_t mChannel;
-
-    Timer mTimer;
+    static void HandleTimer(Timer &aTimer);
 
     Coap::Resource mAnnounceBegin;
-    Coap::Server &mCoapServer;
-    ThreadNetif &mNetif;
 };
 
 /**
  * @}
  */
 
-}  // namespace Thread
+} // namespace ot
 
-#endif  // ANNOUNCE_BEGIN_SERVER_HPP_
+#endif // ANNOUNCE_BEGIN_SERVER_HPP_

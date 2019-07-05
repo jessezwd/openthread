@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -27,10 +27,10 @@
 #  POSSIBILITY OF SUCH DAMAGE.
 #
 
+import ctypes
 import os
 import socket
 import sys
-
 
 class SnifferTransport(object):
     """ Interface for transport that allows eavesdrop other nodes. """
@@ -148,11 +148,12 @@ class SnifferSocketTransport(SnifferTransport):
         return bytearray(data), nodeid
 
 
+class MacFrame(ctypes.Structure):
+    _fields_ = [("buffer", ctypes.c_ubyte * 128),
+                ("length", ctypes.c_ubyte),
+                ("nodeid", ctypes.c_uint)]
+
 class SnifferTransportFactory(object):
 
     def create_transport(self, nodeid):
-        if sys.platform != "win32":
-            return SnifferSocketTransport(nodeid)
-
-        else:
-            raise NotImplementedError
+        return SnifferSocketTransport(nodeid)

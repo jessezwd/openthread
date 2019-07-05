@@ -34,11 +34,14 @@
 #ifndef IP6_ADDRESS_HPP_
 #define IP6_ADDRESS_HPP_
 
+#include "openthread-core-config.h"
+
 #include <stdint.h>
 
-#include <openthread-types.h>
+#include "common/string.hpp"
+#include "mac/mac_frame.hpp"
 
-namespace Thread {
+namespace ot {
 namespace Ip6 {
 
 /**
@@ -53,16 +56,29 @@ namespace Ip6 {
  *
  */
 OT_TOOL_PACKED_BEGIN
-class Address: public otIp6Address
+class Address : public otIp6Address
 {
 public:
+    /**
+     * Masks
+     *
+     */
+    enum
+    {
+        kAloc16Mask            = 0xfc, ///< The mask for Aloc16.
+        kRloc16ReservedBitMask = 0x02, ///< The mask for the reserved bit of Rloc16.
+    };
+
     /**
      * Constants
      *
      */
     enum
     {
-        kInterfaceIdentifierSize   = 8,  ///< Interface Identifier size in bytes.
+        kInterfaceIdentifierSize = 8,  ///< Interface Identifier size in bytes.
+        kIp6AddressStringSize    = 40, ///< Max buffer size in bytes to store an IPv6 address in string format.
+        kMeshLocalPrefixLength   = 64, ///< Length of Thread mesh local prefix.
+        kMeshLocalPrefixSize     = 8,  ///< Mesh local prefix size in bytes.
     };
 
     /**
@@ -79,6 +95,18 @@ public:
         kOrgLocalScope       = 8,  ///< Organization-Local scope
         kGlobalScope         = 14, ///< Global scope
     };
+
+    /**
+     * This type defines the fixed-length `String` object returned from `ToString()`.
+     *
+     */
+    typedef String<kIp6AddressStringSize> InfoString;
+
+    /**
+     * This method clears the IPv6 address by setting it to the Unspecified Address "::".
+     *
+     */
+    void Clear(void);
 
     /**
      * This method indicates whether or not the IPv6 address is the Unspecified Address.
@@ -189,6 +217,15 @@ public:
     bool IsRealmLocalAllMplForwarders(void) const;
 
     /**
+     * This method indicates whether or not the IPv6 address is multicast larger than realm local.
+     *
+     * @retval TRUE   If the IPv6 address is multicast larger than realm local.
+     * @retval FALSE  If the IPv6 address is not multicast or the scope is not larger than realm local.
+     *
+     */
+    bool IsMulticastLargerThanRealmLocal(void) const;
+
+    /**
      * This method indicates whether or not the IPv6 address is a RLOC address.
      *
      * @retval TRUE   If the IPv6 address is a RLOC address.
@@ -205,6 +242,15 @@ public:
      *
      */
     bool IsAnycastRoutingLocator(void) const;
+
+    /**
+     * This method indicates whether or not the IPv6 address is an Anycast Service Locator.
+     *
+     * @retval TRUE   If the IPv6 address is an Anycast Service Locator.
+     * @retval FALSE  If the IPv6 address is not an Anycast Service Locator.
+     *
+     */
+    bool IsAnycastServiceLocator(void) const;
 
     /**
      * This method indicates whether or not the IPv6 address is Subnet-Router Anycast (RFC 4291),
@@ -260,10 +306,26 @@ public:
     /**
      * This method sets the Interface Identifier.
      *
-     * @param[in]  aEui64  A reference to the IEEE EUI-64 address.
+     * @param[in]  aExtAddress  A reference to the extended address.
      *
      */
-    void SetIid(const Mac::ExtAddress &aEui64);
+    void SetIid(const Mac::ExtAddress &aExtAddress);
+
+    /**
+     * This method converts the IPv6 Interface Identifier to an IEEE 802.15.4 Extended Address.
+     *
+     * @param[out]  aExtAddress  A reference to the extended address.
+     *
+     */
+    void ToExtAddress(Mac::ExtAddress &aExtAddress) const;
+
+    /**
+     * This method converts the IPv6 Interface Identifier to an IEEE 802.15.4 MAC Address.
+     *
+     * @param[out]  aMacAddress  A reference to the MAC address.
+     *
+     */
+    void ToExtAddress(Mac::Address &aMacAddress) const;
 
     /**
      * This method returns the IPv6 address scope.
@@ -281,7 +343,7 @@ public:
      * @returns The number of IPv6 prefix bits that match.
      *
      */
-    uint8_t PrefixMatch(const Address &aOther) const;
+    uint8_t PrefixMatch(const otIp6Address &aOther) const;
 
     /**
      * This method evaluates whether or not the IPv6 addresses match.
@@ -310,27 +372,37 @@ public:
      *
      * @param[in]  aBuf  A pointer to the NULL-terminated string.
      *
-     * @retval kThreadError_None         Successfully parsed the IPv6 address string.
-     * @retval kTheradError_InvalidArgs  Failed to parse the IPv6 address string.
+     * @retval OT_ERROR_NONE          Successfully parsed the IPv6 address string.
+     * @retval OT_ERROR_INVALID_ARGS  Failed to parse the IPv6 address string.
      *
      */
-    ThreadError FromString(const char *aBuf);
+    otError FromString(const char *aBuf);
 
     /**
-     * This method converts an IPv6 address object to a NULL-terminated string.
+     * This method converts an IPv6 address object to a string
      *
-     * @param[out]  aBuf   A pointer to the buffer.
-     * @param[in]   aSize  The maximum size of the buffer.
-     *
-     * @returns A pointer to the buffer.
+     * @returns An `InfoString` representing the IPv6 address.
      *
      */
-    const char *ToString(char *aBuf, uint16_t aSize) const;
+    InfoString ToString(void) const;
+
+    /**
+     * This method returns the number of IPv6 prefix bits that match.
+     *
+     * @param[in]  aPrefixA     A pointer to the prefix to match.
+     * @param[in]  aPrefixB     A pointer to the prefix to match against.
+     * @param[in]  aMaxLength   Number of bytes of the two prefixes.
+     *
+     * @returns The number of prefix bits that match.
+     *
+     */
+    static uint8_t PrefixMatch(const uint8_t *aPrefixA, const uint8_t *aPrefixB, uint8_t aMaxLength);
 
 private:
     enum
     {
-        kInterfaceIdentifierOffset = 8,  ///< Interface Identifier offset in bytes.
+        kInterfaceIdentifierOffset = 8, ///< Interface Identifier offset in bytes.
+        kIp4AddressSize            = 4  ///< Size of the IPv4 address.
     };
 } OT_TOOL_PACKED_END;
 
@@ -339,7 +411,7 @@ private:
  *
  */
 
-}  // namespace Ip6
-}  // namespace Thread
+} // namespace Ip6
+} // namespace ot
 
-#endif  // NET_IP6_ADDRESS_HPP_
+#endif // IP6_ADDRESS_HPP_

@@ -34,15 +34,17 @@
 #ifndef KEY_MANAGER_HPP_
 #define KEY_MANAGER_HPP_
 
+#include "openthread-core-config.h"
+
 #include <stdint.h>
 
-#include <openthread-types.h>
-#include <common/timer.hpp>
-#include <crypto/hmac_sha256.hpp>
+#include <openthread/dataset.h>
 
-namespace Thread {
+#include "common/locator.hpp"
+#include "common/timer.hpp"
+#include "crypto/hmac_sha256.hpp"
 
-class ThreadNetif;
+namespace ot {
 
 /**
  * @addtogroup core-security
@@ -53,16 +55,21 @@ class ThreadNetif;
  * @{
  */
 
-class KeyManager
+class KeyManager : public InstanceLocator
 {
 public:
+    enum
+    {
+        kMaxKeyLength = 16,
+    };
+
     /**
      * This constructor initializes the object.
      *
-     * @param[in]  aThreadNetif  A reference to the Thread network interface.
+     * @param[in]  aInstance     A reference to the OpenThread instance.
      *
      */
-    explicit KeyManager(ThreadNetif &aThreadNetif);
+    explicit KeyManager(Instance &aInstance);
 
     /**
      * This method starts KeyManager rotation timer and sets guard timer to initial value.
@@ -77,26 +84,52 @@ public:
     void Stop(void);
 
     /**
-     * This method returns a pointer to the Thread Master Key
+     * This method returns a reference to the Thread Master Key
      *
-     * @param[out]  aKeyLength  A pointer where the key length value will be placed.
-     *
-     * @returns A pointer to the Thread Master Key.
+     * @returns A reference to the Thread Master Key.
      *
      */
-    const uint8_t *GetMasterKey(uint8_t *aKeyLength) const;
+    const otMasterKey &GetMasterKey(void) const;
 
     /**
      * This method sets the Thread Master Key.
      *
-     * @param[in]  aKey        A pointer to the Thread Master Key.
-     * @param[in]  aKeyLength  The length of @p aKey.
+     * @param[in]  aKey        A reference to the Thread Master Key.
      *
-     * @retval kThreadError_None         Successfully set the Thread Master Key.
-     * @retval kThreadError_InvalidArgs  The @p aKeyLength value was invalid.
+     * @retval OT_ERROR_NONE          Successfully set the Thread Master Key.
+     * @retval OT_ERROR_INVALID_ARGS  The @p aKeyLength value was invalid.
      *
      */
-    ThreadError SetMasterKey(const void *aKey, uint8_t aKeyLength);
+    otError SetMasterKey(const otMasterKey &aKey);
+
+#if OPENTHREAD_FTD || OPENTHREAD_MTD
+    /**
+     * This method indicates whether the PSKc is configured.
+     *
+     * A value of all zeros indicates that the PSKc is not configured.
+     *
+     * @retval TRUE  if the PSKc is configured.
+     * @retval FALSE if the PSKc is not not configured.
+     *
+     */
+    bool IsPSKcSet(void) const { return mIsPSKcSet; }
+
+    /**
+     * This method returns a pointer to the PSKc.
+     *
+     * @returns A reference to the PSKc.
+     *
+     */
+    const otPSKc &GetPSKc(void) const { return mPSKc; }
+
+    /**
+     * This method sets the PSKc.
+     *
+     * @param[in]  aPSKc    A reference to the PSKc.
+     *
+     */
+    void SetPSKc(const otPSKc &aPSKc);
+#endif
 
     /**
      * This method returns the current key sequence value.
@@ -104,7 +137,7 @@ public:
      * @returns The current key sequence value.
      *
      */
-    uint32_t GetCurrentKeySequence(void) const;
+    uint32_t GetCurrentKeySequence(void) const { return mKeySequence; }
 
     /**
      * This method sets the current key sequence value.
@@ -120,7 +153,7 @@ public:
      * @returns A pointer to the current MAC key.
      *
      */
-    const uint8_t *GetCurrentMacKey(void) const;
+    const uint8_t *GetCurrentMacKey(void) const { return mKey + kMacKeyOffset; }
 
     /**
      * This method returns a pointer to the current MLE key.
@@ -128,7 +161,7 @@ public:
      * @returns A pointer to the current MLE key.
      *
      */
-    const uint8_t *GetCurrentMleKey(void) const;
+    const uint8_t *GetCurrentMleKey(void) const { return mKey; }
 
     /**
      * This method returns a pointer to a temporary MAC key computed from the given key sequence.
@@ -156,7 +189,7 @@ public:
      * @returns The current MAC Frame Counter value.
      *
      */
-    uint32_t GetMacFrameCounter(void) const;
+    uint32_t GetMacFrameCounter(void) const { return mMacFrameCounter; }
 
     /**
      * This method sets the current MAC Frame Counter value.
@@ -164,7 +197,7 @@ public:
      * @param[in]  aMacFrameCounter  The MAC Frame Counter value.
      *
      */
-    void SetMacFrameCounter(uint32_t aMacFrameCounter);
+    void SetMacFrameCounter(uint32_t aMacFrameCounter) { mMacFrameCounter = aMacFrameCounter; }
 
     /**
      * This method sets the MAC Frame Counter value which is stored in non-volatile memory.
@@ -172,7 +205,7 @@ public:
      * @param[in]  aStoredMacFrameCounter  The stored MAC Frame Counter value.
      *
      */
-    void SetStoredMacFrameCounter(uint32_t aStoredMacFrameCounter);
+    void SetStoredMacFrameCounter(uint32_t aStoredMacFrameCounter) { mStoredMacFrameCounter = aStoredMacFrameCounter; }
 
     /**
      * This method increments the current MAC Frame Counter value.
@@ -186,7 +219,7 @@ public:
      * @returns The current MLE Frame Counter value.
      *
      */
-    uint32_t GetMleFrameCounter(void) const;
+    uint32_t GetMleFrameCounter(void) const { return mMleFrameCounter; }
 
     /**
      * This method sets the current MLE Frame Counter value.
@@ -194,7 +227,7 @@ public:
      * @param[in]  aMleFrameCounter  The MLE Frame Counter value.
      *
      */
-    void SetMleFrameCounter(uint32_t aMleFrameCounter);
+    void SetMleFrameCounter(uint32_t aMleFrameCounter) { mMleFrameCounter = aMleFrameCounter; }
 
     /**
      * This method sets the MLE Frame Counter value which is stored in non-volatile memory.
@@ -202,7 +235,7 @@ public:
      * @param[in]  aStoredMleFrameCounter  The stored MLE Frame Counter value.
      *
      */
-    void SetStoredMleFrameCounter(uint32_t aStoredMleFrameCounter);
+    void SetStoredMleFrameCounter(uint32_t aStoredMleFrameCounter) { mStoredMleFrameCounter = aStoredMleFrameCounter; }
 
     /**
      * This method increments the current MLE Frame Counter value.
@@ -216,7 +249,7 @@ public:
      * @returns A pointer to the KEK.
      *
      */
-    const uint8_t *GetKek(void) const;
+    const uint8_t *GetKek(void) const { return mKek; }
 
     /**
      * This method sets the KEK.
@@ -232,13 +265,13 @@ public:
      * @returns The current KEK Frame Counter value.
      *
      */
-    uint32_t GetKekFrameCounter(void) const;
+    uint32_t GetKekFrameCounter(void) const { return mKekFrameCounter; }
 
     /**
      * This method increments the current KEK Frame Counter value.
      *
      */
-    void IncrementKekFrameCounter(void);
+    void IncrementKekFrameCounter(void) { mKekFrameCounter++; }
 
     /**
      * This method returns the KeyRotation time.
@@ -253,15 +286,15 @@ public:
      * This method sets the KeyRotation time.
      *
      * The KeyRotation time is the time interval after witch security key will be automatically rotated.
-     * It's value shall be in range [kMinKeyRotationTime, kMaxKeyRotationTime].
+     * Its value shall be larger than or equal to kMinKeyRotationTime.
      *
      * @param[in]  aKeyRotation  The KeyRotation value in hours.
      *
-     * @retval  kThreadError_None         KeyRotation time updated.
-     * @retval  kThreadError_InvalidArgs  @p aKeyRotation is out of range.
+     * @retval  OT_ERROR_NONE          KeyRotation time updated.
+     * @retval  OT_ERROR_INVALID_ARGS  @p aKeyRotation is out of range.
      *
      */
-    ThreadError SetKeyRotation(uint32_t aKeyRotation);
+    otError SetKeyRotation(uint32_t aKeyRotation);
 
     /**
      * This method returns the KeySwitchGuardTime.
@@ -303,30 +336,28 @@ public:
      * @param[in]  aSecurityPolicyFlags  The Security Policy Flags.
      *
      */
-    void SetSecurityPolicyFlags(uint8_t aSecurityPolicyFlags) { mSecurityPolicyFlags = aSecurityPolicyFlags; }
+    void SetSecurityPolicyFlags(uint8_t aSecurityPolicyFlags);
 
 private:
     enum
     {
-        kMaxKeyLength = 16,
-        kMinKeyRotationTime = 1,
-        kMaxKeyRotationTime = 0xffffffff / 3600u / 1000u,
-        kDefaultKeyRotationTime = 672,
+        kMinKeyRotationTime        = 1,
+        kDefaultKeyRotationTime    = 672,
         kDefaultKeySwitchGuardTime = 624,
+        kMacKeyOffset              = 16,
+        kOneHourIntervalInMsec     = 3600u * 1000u,
     };
 
-    ThreadError ComputeKey(uint32_t aKeySequence, uint8_t *aKey);
+    void ComputeKey(uint32_t aKeySequence, uint8_t *aKey);
 
-    static void HandleKeyRotationTimer(void *aContext);
-    void HandleKeyRotationTimer(void);
+    void        StartKeyRotationTimer(void);
+    static void HandleKeyRotationTimer(Timer &aTimer);
+    void        HandleKeyRotationTimer(void);
 
-    ThreadNetif &mNetif;
-
-    uint8_t mMasterKey[kMaxKeyLength];
-    uint8_t mMasterKeyLength;
+    otMasterKey mMasterKey;
 
     uint32_t mKeySequence;
-    uint8_t mKey[Crypto::HmacSha256::kHashSize];
+    uint8_t  mKey[Crypto::HmacSha256::kHashSize];
 
     uint8_t mTemporaryKey[Crypto::HmacSha256::kHashSize];
 
@@ -335,21 +366,26 @@ private:
     uint32_t mStoredMacFrameCounter;
     uint32_t mStoredMleFrameCounter;
 
-    uint32_t mKeyRotationTime;
-    uint32_t mKeySwitchGuardTime;
-    bool     mKeySwitchGuardEnabled;
-    Timer    mKeyRotationTimer;
+    uint32_t   mHoursSinceKeyRotation;
+    uint32_t   mKeyRotationTime;
+    uint32_t   mKeySwitchGuardTime;
+    bool       mKeySwitchGuardEnabled;
+    TimerMilli mKeyRotationTimer;
 
-    uint8_t mKek[kMaxKeyLength];
+#if OPENTHREAD_MTD || OPENTHREAD_FTD
+    otPSKc mPSKc;
+#endif
+    uint8_t  mKek[kMaxKeyLength];
     uint32_t mKekFrameCounter;
 
     uint8_t mSecurityPolicyFlags;
+    bool    mIsPSKcSet : 1;
 };
 
 /**
  * @}
  */
 
-}  // namespace Thread
+} // namespace ot
 
-#endif  // KEY_MANAGER_HPP_
+#endif // KEY_MANAGER_HPP_

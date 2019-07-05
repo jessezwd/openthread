@@ -30,11 +30,13 @@
 #else
 #include <stdio.h>
 #include <stdlib.h>
-#define mbedtls_time       time
-#define mbedtls_time_t     time_t
-#define mbedtls_fprintf    fprintf
-#define mbedtls_printf     printf
-#endif
+#define mbedtls_time            time
+#define mbedtls_time_t          time_t
+#define mbedtls_fprintf         fprintf
+#define mbedtls_printf          printf
+#define MBEDTLS_EXIT_SUCCESS    EXIT_SUCCESS
+#define MBEDTLS_EXIT_FAILURE    EXIT_FAILURE
+#endif /* MBEDTLS_PLATFORM_C */
 
 #if !defined(MBEDTLS_BIGNUM_C) || !defined(MBEDTLS_ENTROPY_C) ||  \
     !defined(MBEDTLS_SSL_TLS_C) || !defined(MBEDTLS_SSL_CLI_C) || \
@@ -54,9 +56,10 @@ int main( void )
 
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
-#include "mbedtls/net.h"
+#include "mbedtls/net_sockets.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/x509.h"
+#include "mbedtls/debug.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -144,7 +147,8 @@ static int my_verify( void *data, mbedtls_x509_crt *crt, int depth, uint32_t *fl
 
 int main( int argc, char *argv[] )
 {
-    int ret = 0;
+    int ret = 1;
+    int exit_code = MBEDTLS_EXIT_FAILURE;
     mbedtls_net_context server_fd;
     unsigned char buf[1024];
     mbedtls_entropy_context entropy;
@@ -152,9 +156,7 @@ int main( int argc, char *argv[] )
     mbedtls_ssl_context ssl;
     mbedtls_ssl_config conf;
     mbedtls_x509_crt cacert;
-    mbedtls_x509_crt clicert;
     mbedtls_x509_crl cacrl;
-    mbedtls_pk_context pkey;
     int i, j;
     uint32_t flags;
     int verify = 0;
@@ -169,7 +171,6 @@ int main( int argc, char *argv[] )
     mbedtls_ssl_init( &ssl );
     mbedtls_ssl_config_init( &conf );
     mbedtls_x509_crt_init( &cacert );
-    mbedtls_x509_crt_init( &clicert );
 #if defined(MBEDTLS_X509_CRL_PARSE_C)
     mbedtls_x509_crl_init( &cacrl );
 #else
@@ -177,13 +178,11 @@ int main( int argc, char *argv[] )
        it to the verify function */
     memset( &cacrl, 0, sizeof(mbedtls_x509_crl) );
 #endif
-    mbedtls_pk_init( &pkey );
 
     if( argc == 0 )
     {
     usage:
         mbedtls_printf( USAGE );
-        ret = 2;
         goto exit;
     }
 
@@ -255,19 +254,23 @@ int main( int argc, char *argv[] )
 
     if( strlen( opt.ca_path ) )
     {
-        ret = mbedtls_x509_crt_parse_path( &cacert, opt.ca_path );
+        if( ( ret = mbedtls_x509_crt_parse_path( &cacert, opt.ca_path ) ) < 0 )
+        {
+            mbedtls_printf( " failed\n  !  mbedtls_x509_crt_parse_path returned -0x%x\n\n", -ret );
+            goto exit;
+        }
+
         verify = 1;
     }
     else if( strlen( opt.ca_file ) )
     {
-        ret = mbedtls_x509_crt_parse_file( &cacert, opt.ca_file );
-        verify = 1;
-    }
+        if( ( ret = mbedtls_x509_crt_parse_file( &cacert, opt.ca_file ) ) < 0 )
+        {
+            mbedtls_printf( " failed\n  !  mbedtls_x509_crt_parse_file returned -0x%x\n\n", -ret );
+            goto exit;
+        }
 
-    if( ret < 0 )
-    {
-        mbedtls_printf( " failed\n  !  mbedtls_x509_crt_parse returned -0x%x\n\n", -ret );
-        goto exit;
+        verify = 1;
     }
 
     mbedtls_printf( " ok (%d skipped)\n", ret );
@@ -335,8 +338,6 @@ int main( int argc, char *argv[] )
             cur = cur->next;
         }
 
-        ret = 0;
-
         /*
          * 1.3 Verify the certificate
          */
@@ -380,6 +381,10 @@ int main( int argc, char *argv[] )
 
         mbedtls_printf( " ok\n" );
 
+#if defined(MBEDTLS_DEBUG_C)
+        mbedtls_debug_set_threshold( opt.debug_level );
+#endif
+
         /*
          * 2. Start the connection
          */
@@ -417,12 +422,6 @@ int main( int argc, char *argv[] )
 
         mbedtls_ssl_conf_rng( &conf, mbedtls_ctr_drbg_random, &ctr_drbg );
         mbedtls_ssl_conf_dbg( &conf, my_debug, stdout );
-
-        if( ( ret = mbedtls_ssl_conf_own_cert( &conf, &clicert, &pkey ) ) != 0 )
-        {
-            mbedtls_printf( " failed\n  ! mbedtls_ssl_conf_own_cert returned %d\n\n", ret );
-            goto ssl_exit;
-        }
 
         if( ( ret = mbedtls_ssl_setup( &ssl, &conf ) ) != 0 )
         {
@@ -475,15 +474,15 @@ ssl_exit:
     else
         goto usage;
 
+    exit_code = MBEDTLS_EXIT_SUCCESS;
+
 exit:
 
     mbedtls_net_free( &server_fd );
     mbedtls_x509_crt_free( &cacert );
-    mbedtls_x509_crt_free( &clicert );
 #if defined(MBEDTLS_X509_CRL_PARSE_C)
     mbedtls_x509_crl_free( &cacrl );
 #endif
-    mbedtls_pk_free( &pkey );
     mbedtls_ctr_drbg_free( &ctr_drbg );
     mbedtls_entropy_free( &entropy );
 
@@ -492,10 +491,7 @@ exit:
     fflush( stdout ); getchar();
 #endif
 
-    if( ret < 0 )
-        ret = 1;
-
-    return( ret );
+    return( exit_code );
 }
 #endif /* MBEDTLS_BIGNUM_C && MBEDTLS_ENTROPY_C && MBEDTLS_SSL_TLS_C &&
           MBEDTLS_SSL_CLI_C && MBEDTLS_NET_C && MBEDTLS_RSA_C &&

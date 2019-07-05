@@ -28,17 +28,74 @@
 
 #include "platform-posix.h"
 
-#include <openthread-types.h>
-#include <platform/misc.h>
+#include <setjmp.h>
+#include <unistd.h>
+
+#include <openthread/platform/misc.h>
+
+#include "openthread-system.h"
+
+extern jmp_buf gResetJump;
+
+static otPlatResetReason   sPlatResetReason = OT_PLAT_RESET_REASON_POWER_ON;
+bool                       gPlatformPseudoResetWasRequested;
+static otPlatMcuPowerState gPlatMcuPowerState = OT_PLAT_MCU_POWER_STATE_ON;
 
 void otPlatReset(otInstance *aInstance)
 {
-    // This function does nothing on the Posix platform.
-    (void)aInstance;
+    OT_UNUSED_VARIABLE(aInstance);
+
+#if OPENTHREAD_PLATFORM_USE_PSEUDO_RESET
+    gPlatformPseudoResetWasRequested = true;
+    sPlatResetReason                 = OT_PLAT_RESET_REASON_SOFTWARE;
+
+#else // OPENTHREAD_PLATFORM_USE_PSEUDO_RESET
+    // Restart the process using execvp.
+    otSysDeinit();
+    platformUartRestore();
+
+    longjmp(gResetJump, 1);
+    assert(false);
+
+#endif // OPENTHREAD_PLATFORM_USE_PSEUDO_RESET
 }
 
 otPlatResetReason otPlatGetResetReason(otInstance *aInstance)
 {
-    (void)aInstance;
-    return kPlatResetReason_PowerOn;
+    OT_UNUSED_VARIABLE(aInstance);
+
+    return sPlatResetReason;
+}
+
+void otPlatWakeHost(void)
+{
+    // TODO: implement an operation to wake the host from sleep state.
+}
+
+otError otPlatSetMcuPowerState(otInstance *aInstance, otPlatMcuPowerState aState)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+
+    otError error = OT_ERROR_NONE;
+
+    switch (aState)
+    {
+    case OT_PLAT_MCU_POWER_STATE_ON:
+    case OT_PLAT_MCU_POWER_STATE_LOW_POWER:
+        gPlatMcuPowerState = aState;
+        break;
+
+    default:
+        error = OT_ERROR_FAILED;
+        break;
+    }
+
+    return error;
+}
+
+otPlatMcuPowerState otPlatGetMcuPowerState(otInstance *aInstance)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+
+    return gPlatMcuPowerState;
 }

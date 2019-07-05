@@ -27,25 +27,27 @@
 #
 
 include $(abs_top_nlbuild_autotools_dir)/automake/pre.am
+include $(top_srcdir)/examples/platforms/Makefile.platform.am
 
 bin_PROGRAMS                                                           = \
-    ot-cli-ftd                                                           \
-    ot-cli-mtd                                                           \
     $(NULL)
 
-CPPFLAGS_COMMON                                                        = \
+CPPFLAGS_COMMON                                                       += \
     -I$(top_srcdir)/include                                              \
     -I$(top_srcdir)/src/core                                             \
     -I$(top_srcdir)/examples/platforms                                   \
     $(NULL)
 
-LDADD_COMMON                                                           = \
+LDADD_COMMON                                                          += \
     $(NULL)
 
-LDFLAGS_COMMON                                                         = \
+LDFLAGS_COMMON                                                        += \
     $(NULL)
 
-SOURCES_COMMON                                                         = \
+LIBTOOLFLAGS_COMMON                                                   += \
+    $(NULL)
+
+SOURCES_COMMON                                                        += \
     main.c                                                               \
     $(NULL)
 
@@ -61,40 +63,20 @@ LDADD_COMMON                                                          += \
     $(NULL)
 endif # OPENTHREAD_ENABLE_DIAG
 
-if OPENTHREAD_EXAMPLES_POSIX
-LDADD_COMMON                                                          += \
-    $(top_builddir)/examples/platforms/posix/libopenthread-posix.a       \
-    -lstdc++                                                             \
+if OPENTHREAD_ENABLE_FTD
+bin_PROGRAMS                                                          += \
+    ot-cli-ftd                                                           \
     $(NULL)
-endif # OPENTHREAD_EXAMPLES_POSIX
-
-if OPENTHREAD_EXAMPLES_CC2538
-LDADD_COMMON                                                          += \
-    $(top_builddir)/examples/platforms/cc2538/libopenthread-cc2538.a     \
-    $(NULL)
-
-LDFLAGS_COMMON                                                        += \
-    -T $(top_srcdir)/examples/platforms/cc2538/cc2538.ld                 \
-    $(NULL)
-endif # OPENTHREAD_EXAMPLES_CC2538
-
-
-if OPENTHREAD_EXAMPLES_DA15000
-LDADD_COMMON                                                          += \
-    $(top_builddir)/examples/platforms/da15000/libopenthread-da15000.a   \
-    $(NULL)
-
-LDFLAGS_COMMON                                                        += \
-    -T $(top_srcdir)/examples/platforms/da15000/da15000.ld               \
-    $(NULL)
-endif # OPENTHREAD_EXAMPLES_DA15000
+endif
 
 ot_cli_ftd_CPPFLAGS                                                    = \
     $(CPPFLAGS_COMMON)                                                   \
     $(NULL)
 
 ot_cli_ftd_LDADD                                                       = \
-    $(top_builddir)/src/cli/libopenthread-cli.a                          \
+    $(top_builddir)/src/cli/libopenthread-cli-ftd.a                      \
+    $(top_builddir)/src/core/libopenthread-ftd.a                         \
+    $(LDADD_COMMON)                                                      \
     $(top_builddir)/src/core/libopenthread-ftd.a                         \
     $(LDADD_COMMON)                                                      \
     $(NULL)
@@ -103,16 +85,28 @@ ot_cli_ftd_LDFLAGS                                                     = \
     $(LDFLAGS_COMMON)                                                    \
     $(NULL)
 
+ot_cli_ftd_LIBTOOLFLAGS                                                = \
+    $(LIBTOOLFLAGS_COMMON)                                               \
+    $(NULL)
+
 ot_cli_ftd_SOURCES                                                     = \
     $(SOURCES_COMMON)                                                    \
     $(NULL)
+
+if OPENTHREAD_ENABLE_MTD
+bin_PROGRAMS                                                          += \
+    ot-cli-mtd                                                           \
+    $(NULL)
+endif
 
 ot_cli_mtd_CPPFLAGS                                                    = \
     $(CPPFLAGS_COMMON)                                                   \
     $(NULL)
 
 ot_cli_mtd_LDADD                                                       = \
-    $(top_builddir)/src/cli/libopenthread-cli.a                          \
+    $(top_builddir)/src/cli/libopenthread-cli-mtd.a                      \
+    $(top_builddir)/src/core/libopenthread-mtd.a                         \
+    $(LDADD_COMMON)                                                      \
     $(top_builddir)/src/core/libopenthread-mtd.a                         \
     $(LDADD_COMMON)                                                      \
     $(NULL)
@@ -121,11 +115,24 @@ ot_cli_mtd_LDFLAGS                                                     = \
     $(LDFLAGS_COMMON)                                                    \
     $(NULL)
 
+ot_cli_mtd_LIBTOOLFLAGS                                                = \
+    $(LIBTOOLFLAGS_COMMON)                                               \
+    $(NULL)
+
 ot_cli_mtd_SOURCES                                                     = \
     $(SOURCES_COMMON)                                                    \
     $(NULL)
 
+if OPENTHREAD_ENABLE_LINKER_MAP
+ot_cli_ftd_LDFLAGS                                                    += -Wl,-Map=ot-cli-ftd.map
+ot_cli_mtd_LDFLAGS                                                    += -Wl,-Map=ot-cli-mtd.map
+endif
+
 if OPENTHREAD_BUILD_COVERAGE
+CPPFLAGS_COMMON                                                       += \
+    -DOPENTHREAD_ENABLE_COVERAGE                                         \
+    $(NULL)
+
 CLEANFILES                                                             = $(wildcard *.gcda *.gcno)
 endif # OPENTHREAD_BUILD_COVERAGE
 

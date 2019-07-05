@@ -34,53 +34,429 @@ die() {
 
 set -x
 
-./bootstrap || die
+python --version || die
 
 [ $BUILD_TARGET != pretty-check ] || {
-    export PATH=/tmp/astyle/build/gcc/bin:$PATH || die
-    ./configure --enable-cli --enable-diag --enable-dhcp6-client --enable-dhcp6-server --enable-commissioner --enable-joiner --with-examples=posix || die
+    ./bootstrap || die
+    ./configure || die
     make pretty-check || die
 }
 
+[ $BUILD_TARGET != py-pretty-check ] || {
+    flake8 --config=script/pystyle.cfg tools/harness-thci/ || die
+}
+
 [ $BUILD_TARGET != scan-build ] || {
-    scan-build ./configure --with-examples=posix --enable-cli --enable-ncp || die
-    scan-build --status-bugs -analyze-headers -v make || die
+    ./bootstrap || die
+
+    export CPPFLAGS="-DMBEDTLS_DEBUG_C"
+    export CPPFLAGS="${CPPFLAGS} -I${TRAVIS_BUILD_DIR}/third_party/mbedtls"
+    export CPPFLAGS="${CPPFLAGS} -I${TRAVIS_BUILD_DIR}/third_party/mbedtls/repo/include"
+    export CPPFLAGS="${CPPFLAGS} -DMBEDTLS_CONFIG_FILE=\\\"mbedtls-config.h\\\""
+
+    scan-build ./configure                \
+        --enable-application-coap         \
+        --enable-application-coap-secure  \
+        --enable-border-agent             \
+        --enable-border-router            \
+        --enable-builtin-mbedtls=no       \
+        --enable-cert-log                 \
+        --enable-channel-manager          \
+        --enable-channel-monitor          \
+        --enable-child-supervision        \
+        --enable-cli                      \
+        --enable-commissioner             \
+        --enable-dhcp6-client             \
+        --enable-dhcp6-server             \
+        --enable-diag                     \
+        --enable-dns-client               \
+        --enable-ecdsa                    \
+        --enable-executable=no            \
+        --enable-ftd                      \
+        --enable-jam-detection            \
+        --enable-joiner                   \
+        --enable-legacy                   \
+        --enable-mac-filter               \
+        --enable-mtd                      \
+        --enable-mtd-network-diagnostic   \
+        --enable-ncp                      \
+        --with-ncp-bus=uart               \
+        --enable-radio-only               \
+        --enable-raw-link-api             \
+        --enable-service                  \
+        --enable-sntp-client              \
+        --enable-udp-forward              \
+        --with-examples=posix || die
+
+    scan-build --status-bugs -analyze-headers -v make -j2 || die
 }
 
-[ $BUILD_TARGET != arm-gcc49 ] || {
+[ $BUILD_TARGET != android-build ] || {
+    (cd .. && ${TRAVIS_BUILD_DIR}/.travis/check-android-build) || die
+}
+
+build_cc1352() {
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 SLAAC=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-cc1352 || die
+    arm-none-eabi-size  output/cc1352/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/cc1352/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/cc1352/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/cc1352/bin/ot-ncp-mtd || die
+}
+
+build_cc2538() {
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 SLAAC=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-cc2538 || die
+    arm-none-eabi-size  output/cc2538/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/cc2538/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/cc2538/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/cc2538/bin/ot-ncp-mtd || die
+}
+
+build_cc2650() {
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    make -f examples/Makefile-cc2650 || die
+    arm-none-eabi-size  output/cc2650/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/cc2650/bin/ot-ncp-mtd || die
+}
+
+build_cc2652() {
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 SLAAC=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-cc2652 || die
+    arm-none-eabi-size  output/cc2652/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/cc2652/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/cc2652/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/cc2652/bin/ot-ncp-mtd || die
+}
+
+build_emsk() {
+    export PATH=/tmp/arc_gnu_2017.03-rc2_prebuilt_elf32_le_linux_install/bin:$PATH || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 SLAAC=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-emsk || die
+    arc-elf32-size  output/emsk/bin/ot-cli-ftd || die
+    arc-elf32-size  output/emsk/bin/ot-cli-mtd || die
+    arc-elf32-size  output/emsk/bin/ot-ncp-ftd || die
+    arc-elf32-size  output/emsk/bin/ot-ncp-mtd || die
+}
+
+build_kw41z() {
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 SLAAC=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-kw41z || die
+    arm-none-eabi-size  output/kw41z/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/kw41z/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/kw41z/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/kw41z/bin/ot-ncp-mtd || die
+}
+
+build_nrf52811() {
+    # Default OpenThread switches for nRF52811 platform
+    OPENTHREAD_FLAGS="BORDER_ROUTER=1 COAP=1 DNS_CLIENT=1 LINK_RAW=1 MAC_FILTER=1 MTD_NETDIAG=1"
+
+    # UART transport
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    make -f examples/Makefile-nrf52811 $OPENTHREAD_FLAGS || die
+    arm-none-eabi-size  output/nrf52811/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/nrf52811/bin/ot-ncp-mtd || die
+    arm-none-eabi-size  output/nrf52811/bin/ot-rcp || die
+
+    # SPI transport for NCP
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    NCP_SPI=1 make -f examples/Makefile-nrf52811 $OPENTHREAD_FLAGS || die
+    arm-none-eabi-size  output/nrf52811/bin/ot-ncp-mtd || die
+    arm-none-eabi-size  output/nrf52811/bin/ot-rcp || die
+
+    # Build without transport (no CLI or NCP applications)
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    DISABLE_TRANSPORTS=1 make -f examples/Makefile-nrf52811 || die
+}
+
+build_nrf52840() {
+    # Default OpenThread switches for nRF52840 platform
+    OPENTHREAD_FLAGS="BORDER_AGENT=1 BORDER_ROUTER=1 COAP=1 COAPS=1 COMMISSIONER=1 SLAAC=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 ECDSA=1 FULL_LOGS=1 JOINER=1 LINK_RAW=1 MAC_FILTER=1 MTD_NETDIAG=1 SERVICE=1 SNTP_CLIENT=1 UDP_FORWARD=1"
+
+    # UART transport
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    make -f examples/Makefile-nrf52840 $OPENTHREAD_FLAGS || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-mtd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-rcp || die
+
+    # USB transport with bootloader e.g. to support PCA10059 dongle
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    USB=1 BOOTLOADER=1 make -f examples/Makefile-nrf52840 $OPENTHREAD_FLAGS || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-mtd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-rcp || die
+
+    # SPI transport for NCP
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    NCP_SPI=1 make -f examples/Makefile-nrf52840 $OPENTHREAD_FLAGS || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-ncp-mtd || die
+    arm-none-eabi-size  output/nrf52840/bin/ot-rcp || die
+
+    # Build without transport (no CLI or NCP applications)
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    DISABLE_TRANSPORTS=1 make -f examples/Makefile-nrf52840 $OPENTHREAD_FLAGS || die
+}
+
+build_qpg6095() {
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 SLAAC=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-qpg6095 || die
+    arm-none-eabi-size  output/qpg6095/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/qpg6095/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/qpg6095/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/qpg6095/bin/ot-ncp-mtd || die
+}
+
+build_samr21() {
+    git checkout -- . || die
+    git clean -xfd || die
+    wget http://ww1.microchip.com/downloads/en/DeviceDoc/asf-standalone-archive-3.45.0.85.zip || die
+    unzip -qq asf-standalone-archive-3.45.0.85.zip || die
+    mv xdk-asf-3.45.0 third_party/microchip/asf || die
+    ./bootstrap || die
+    COMMISSIONER=1 JOINER=1 SLAAC=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 DNS_CLIENT=1 make -f examples/Makefile-samr21 || die
+    arm-none-eabi-size  output/samr21/bin/ot-cli-ftd || die
+    arm-none-eabi-size  output/samr21/bin/ot-cli-mtd || die
+    arm-none-eabi-size  output/samr21/bin/ot-ncp-ftd || die
+    arm-none-eabi-size  output/samr21/bin/ot-ncp-mtd || die
+}
+
+[ $BUILD_TARGET != arm-gcc-4 ] || {
     export PATH=/tmp/gcc-arm-none-eabi-4_9-2015q3/bin:$PATH || die
-    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 make -f examples/Makefile-cc2538 || die
-    arm-none-eabi-size  output/bin/arm-none-eabi-ot-cli-ftd || die
-    arm-none-eabi-size  output/bin/arm-none-eabi-ot-cli-mtd || die
-    arm-none-eabi-size  output/bin/arm-none-eabi-ot-ncp || die
+
+    build_cc1352
+    build_cc2538
+    build_cc2650
+    build_cc2652
+    build_kw41z
+    build_nrf52811
+    build_nrf52840
+    build_qpg6095
+    build_samr21
 }
 
-[ $BUILD_TARGET != arm-gcc54 ] || {
+[ $BUILD_TARGET != arm-gcc-5 ] || {
     export PATH=/tmp/gcc-arm-none-eabi-5_4-2016q3/bin:$PATH || die
-    COMMISSIONER=1 JOINER=1 DHCP6_CLIENT=1 DHCP6_SERVER=1 make -f examples/Makefile-cc2538 || die
-    arm-none-eabi-size  output/bin/arm-none-eabi-ot-cli-ftd || die
-    arm-none-eabi-size  output/bin/arm-none-eabi-ot-cli-mtd || die
-    arm-none-eabi-size  output/bin/arm-none-eabi-ot-ncp || die
+
+    build_cc1352
+    build_cc2538
+    build_cc2650
+    build_cc2652
+    build_kw41z
+    build_nrf52811
+    build_nrf52840
+    build_qpg6095
+    build_samr21
+}
+
+[ $BUILD_TARGET != arm-gcc-6 ] || {
+    export PATH=/tmp/gcc-arm-none-eabi-6-2017-q2-update/bin:$PATH || die
+
+    build_cc1352
+    build_cc2538
+    build_cc2650
+    build_cc2652
+    build_kw41z
+    build_nrf52811
+    build_nrf52840
+    build_qpg6095
+    build_samr21
+
+    build_emsk
+}
+
+[ $BUILD_TARGET != arm-gcc-7 ] || {
+    export PATH=/tmp/gcc-arm-none-eabi-7-2018-q2-update/bin:$PATH || die
+
+    build_cc1352
+    build_cc2538
+    build_cc2650
+    build_cc2652
+    build_kw41z
+    build_nrf52811
+    build_nrf52840
+    build_qpg6095
+    build_samr21
+}
+
+[ $BUILD_TARGET != arm-gcc-8 ] || {
+    export PATH=/tmp/gcc-arm-none-eabi-8-2018-q4-major/bin:$PATH || die
+
+    build_cc1352
+    build_cc2538
+    build_cc2650
+    build_cc2652
+    build_kw41z
+    build_nrf52811
+    build_nrf52840
+    build_qpg6095
+    build_samr21
 }
 
 [ $BUILD_TARGET != posix ] || {
-    sh -c '$CC --version' || die
-    sh -c '$CXX --version' || die
-    make -f examples/Makefile-posix || die
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    CPPFLAGS=-DOPENTHREAD_CONFIG_LOG_LEVEL=OT_LOG_LEVEL_NONE make -f examples/Makefile-posix || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    CPPFLAGS=-DOPENTHREAD_CONFIG_LOG_LEVEL=OT_LOG_LEVEL_DEBG make -f examples/Makefile-posix || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    ./configure                             \
+        --enable-ncp                        \
+        --enable-ftd                        \
+        --enable-mtd                        \
+        --with-ncp-bus=spi                  \
+        --with-examples=posix               \
+        --enable-border-router              \
+        --enable-child-supervision          \
+        --enable-diag                       \
+        --enable-jam-detection              \
+        --enable-legacy                     \
+        --enable-mac-filter                 \
+        --enable-service                    \
+        --enable-channel-manager            \
+        --enable-channel-monitor            \
+        --disable-docs                      \
+        --disable-tests                     \
+        --with-vendor-extension=./src/core/common/extension_example.cpp || die
+    make -j 8 || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    ./configure                             \
+        --enable-cli                        \
+        --enable-mtd                        \
+        --with-ncp-bus=spi                  \
+        --with-examples=posix               \
+        --enable-border-router              \
+        --enable-child-supervision          \
+        --enable-legacy                     \
+        --enable-mac-filter                 \
+        --enable-service                    \
+        --disable-docs                      \
+        --disable-tests || die
+    make -j 8 || die
+
+    export CPPFLAGS="-DOPENTHREAD_CONFIG_ENABLE_TIME_SYNC=1 -DOPENTHREAD_CONFIG_ENABLE_ANNOUNCE_SENDER=1"
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    ./configure                             \
+        --enable-cli                        \
+        --enable-ncp                        \
+        --enable-ftd                        \
+        --enable-mtd                        \
+        --enable-radio-only                 \
+        --with-ncp-bus=uart                 \
+        --with-examples=posix || die
+    make -j 8 || die
 }
 
 [ $BUILD_TARGET != posix-distcheck ] || {
-    BuildJobs=10 make -f examples/Makefile-posix distcheck || die
+    export ASAN_SYMBOLIZER_PATH=`which llvm-symbolizer` || die
+    export ASAN_OPTIONS=symbolize=1 || die
+    export DISTCHECK_CONFIGURE_FLAGS= CPPFLAGS=-DOPENTHREAD_POSIX_VIRTUAL_TIME=1 || die
+    ./bootstrap || die
+    CERT_LOG=1 make -f examples/Makefile-posix distcheck || die
 }
 
 [ $BUILD_TARGET != posix-32-bit ] || {
-    COVERAGE=1 CFLAGS=-m32 CXXFLAGS=-m32 LDFLAGS=-m32 BuildJobs=10 make -f examples/Makefile-posix check || die
+    ./bootstrap || die
+    CERT_LOG=1 COVERAGE=1 CFLAGS=-m32 CXXFLAGS=-m32 LDFLAGS=-m32 make -f examples/Makefile-posix check || die
+}
+
+[ $BUILD_TARGET != posix-app-cli ] || {
+    ./bootstrap || die
+    # enable code coverage for OpenThread transceiver only
+    CERT_LOG=1 COVERAGE=1 VIRTUAL_TIME_UART=1 make -f examples/Makefile-posix || die
+    # readline supports pipe, editline does not
+    CERT_LOG=1 COVERAGE=1 READLINE=readline make -f src/posix/Makefile-posix || die
+    CERT_LOG=1 COVERAGE=1 PYTHONUNBUFFERED=1 OT_CLI_PATH="$(pwd)/$(ls output/posix/*/bin/ot-cli)" RADIO_DEVICE="$(pwd)/$(ls output/*/bin/ot-rcp)" make -f src/posix/Makefile-posix check || die
+}
+
+[ $BUILD_TARGET != posix-app-pty ] || {
+    ./bootstrap
+    .travis/check-posix-app-pty || die
+}
+
+[ $BUILD_TARGET != posix-mtd ] || {
+    ./bootstrap || die
+    CERT_LOG=1 COVERAGE=1 CFLAGS=-m32 CXXFLAGS=-m32 LDFLAGS=-m32 USE_MTD=1 make -f examples/Makefile-posix check || die
 }
 
 [ $BUILD_TARGET != posix-ncp-spi ] || {
-    BuildJobs=10 make -f examples/Makefile-posix check configure_OPTIONS="--enable-ncp=spi --with-examples=posix --with-platform-info=POSIX" || die
+    ./bootstrap || die
+    make -f examples/Makefile-posix check configure_OPTIONS="--enable-ncp --enable-ftd --with-ncp-bus=spi --with-examples=posix" || die
+}
+
+[ $BUILD_TARGET != posix-app-ncp ] || {
+    ./bootstrap || die
+    CERT_LOG=1 COVERAGE=1 VIRTUAL_TIME_UART=1 make -f examples/Makefile-posix || die
+    # enable code coverage for OpenThread posix radio
+    CERT_LOG=1 COVERAGE=1 READLINE=readline make -f src/posix/Makefile-posix || die
+    CERT_LOG=1 COVERAGE=1 PYTHONUNBUFFERED=1 OT_NCP_PATH="$(pwd)/$(ls output/posix/*/bin/ot-ncp)" RADIO_DEVICE="$(pwd)/$(ls output/*/bin/ot-rcp)" NODE_TYPE=ncp-sim make -f src/posix/Makefile-posix check || die
 }
 
 [ $BUILD_TARGET != posix-ncp ] || {
-    COVERAGE=1 NODE_TYPE=ncp-sim BuildJobs=10 make -f examples/Makefile-posix check || die
+    ./bootstrap || die
+    CERT_LOG=1 COVERAGE=1 PYTHONUNBUFFERED=1 NODE_TYPE=ncp-sim make -f examples/Makefile-posix check || die
+}
+
+[ $BUILD_TARGET != toranj-test-framework ] || {
+    ./tests/toranj/start.sh || die
+}
+
+[ $BUILD_TARGET != osx ] || {
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    make -f examples/Makefile-posix || die
+
+    git checkout -- . || die
+    git clean -xfd || die
+    ./bootstrap || die
+    make -f src/posix/Makefile-posix || die
 }

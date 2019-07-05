@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -30,6 +30,7 @@
 import time
 import unittest
 
+import config
 import node
 
 LEADER = 1
@@ -38,11 +39,15 @@ ROUTER2 = 3
 ED = 4
 SED = 5
 
+MTDS = [ED, SED]
+
 class Cert_5_6_9_NetworkDataForwarding(unittest.TestCase):
     def setUp(self):
+        self.simulator = config.create_default_simulator()
+
         self.nodes = {}
         for i in range(1,6):
-            self.nodes[i] = node.Node(i)
+            self.nodes[i] = node.Node(i, (i in MTDS), simulator=self.simulator)
 
         self.nodes[LEADER].set_panid(0xface)
         self.nodes[LEADER].set_mode('rsdn')
@@ -73,43 +78,48 @@ class Cert_5_6_9_NetworkDataForwarding(unittest.TestCase):
         self.nodes[SED].set_mode('s')
         self.nodes[SED].add_whitelist(self.nodes[ROUTER1].get_addr64())
         self.nodes[SED].enable_whitelist()
-        self.nodes[SED].set_timeout(3)
+        self.nodes[SED].set_timeout(config.DEFAULT_CHILD_TIMEOUT)
 
     def tearDown(self):
         for node in list(self.nodes.values()):
             node.stop()
-        del self.nodes
+            node.destroy()
+        self.simulator.stop()
 
     def test(self):
         self.nodes[LEADER].start()
-        self.nodes[LEADER].set_state('leader')
+        self.simulator.go(4)
         self.assertEqual(self.nodes[LEADER].get_state(), 'leader')
 
         self.nodes[ROUTER1].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ROUTER1].get_state(), 'router')
 
         self.nodes[ROUTER2].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ROUTER2].get_state(), 'router')
 
         self.nodes[ED].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ED].get_state(), 'child')
 
         self.nodes[SED].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[SED].get_state(), 'child')
 
         self.nodes[LEADER].add_prefix('2001:2:0:1::/64', 'paros', 'med')
         self.nodes[LEADER].add_route('2001:2:0:2::/64', 'med')
         self.nodes[LEADER].register_netdata()
-        time.sleep(10)
+
+        # Set lowpan context of sniffer
+        self.simulator.set_lowpan_context(1, '2001:2:0:1::/64')
+
+        self.simulator.go(10)
 
         self.nodes[ROUTER2].add_prefix('2001:2:0:1::/64', 'paros', 'low')
         self.nodes[ROUTER2].add_route('2001:2:0:2::/64', 'high')
         self.nodes[ROUTER2].register_netdata()
-        time.sleep(10)
+        self.simulator.go(10)
 
         self.assertFalse(self.nodes[SED].ping('2001:2:0:2::1'))
 
@@ -118,14 +128,14 @@ class Cert_5_6_9_NetworkDataForwarding(unittest.TestCase):
         self.nodes[ROUTER2].remove_prefix('2001:2:0:1::/64')
         self.nodes[ROUTER2].add_prefix('2001:2:0:1::/64', 'paros', 'high')
         self.nodes[ROUTER2].register_netdata()
-        time.sleep(10)
+        self.simulator.go(10)
 
         self.assertFalse(self.nodes[SED].ping('2007::1'))
 
         self.nodes[ROUTER2].remove_prefix('2001:2:0:1::/64')
         self.nodes[ROUTER2].add_prefix('2001:2:0:1::/64', 'paros', 'med')
         self.nodes[ROUTER2].register_netdata()
-        time.sleep(10)
+        self.simulator.go(10)
 
         self.assertFalse(self.nodes[SED].ping('2007::1'))
 

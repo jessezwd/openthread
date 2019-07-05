@@ -29,31 +29,34 @@
 #include "platform-posix.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
-#include <stdlib.h>
+#include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
-#include <errno.h>
-#include <signal.h>
 
-#include <common/code_utils.hpp>
-#include <platform/uart.h>
+#include <openthread/platform/debug_uart.h>
+#include <openthread/platform/uart.h>
 
+#include "utils/code_utils.h"
+
+#if OPENTHREAD_POSIX_VIRTUAL_TIME_UART == 0
 #ifdef OPENTHREAD_TARGET_LINUX
 #include <sys/prctl.h>
-int posix_openpt(int oflag);
-int grantpt(int fildes);
-int unlockpt(int fd);
+int   posix_openpt(int oflag);
+int   grantpt(int fildes);
+int   unlockpt(int fd);
 char *ptsname(int fd);
-#endif  // OPENTHREAD_TARGET_LINUX
+#endif // OPENTHREAD_TARGET_LINUX
 
-static uint8_t s_receive_buffer[128];
+static uint8_t        s_receive_buffer[128];
 static const uint8_t *s_write_buffer;
-static uint16_t s_write_length;
-static int s_in_fd;
-static int s_out_fd;
+static uint16_t       s_write_length;
+static int            s_in_fd;
+static int            s_out_fd;
 
 static struct termios original_stdin_termios;
 static struct termios original_stdout_termios;
@@ -68,9 +71,16 @@ static void restore_stdout_termios(void)
     tcsetattr(s_out_fd, TCSAFLUSH, &original_stdout_termios);
 }
 
-ThreadError otPlatUartEnable(void)
+void platformUartRestore(void)
 {
-    ThreadError error = kThreadError_None;
+    restore_stdin_termios();
+    restore_stdout_termios();
+    dup2(s_out_fd, STDOUT_FILENO);
+}
+
+otError otPlatUartEnable(void)
+{
+    otError        error = OT_ERROR_NONE;
     struct termios termios;
 
 #ifdef OPENTHREAD_TARGET_LINUX
@@ -79,7 +89,7 @@ ThreadError otPlatUartEnable(void)
     prctl(PR_SET_PDEATHSIG, SIGHUP);
 #endif
 
-    s_in_fd = dup(STDIN_FILENO);
+    s_in_fd  = dup(STDIN_FILENO);
     s_out_fd = dup(STDOUT_FILENO);
     dup2(STDERR_FILENO, STDOUT_FILENO);
 
@@ -102,7 +112,7 @@ ThreadError otPlatUartEnable(void)
     if (isatty(s_in_fd))
     {
         // get current configuration
-        VerifyOrExit(tcgetattr(s_in_fd, &termios) == 0, perror("tcgetattr"); error = kThreadError_Error);
+        otEXPECT_ACTION(tcgetattr(s_in_fd, &termios) == 0, perror("tcgetattr"); error = OT_ERROR_GENERIC);
 
         // Set up the termios settings for raw mode. This turns
         // off input/output processing, line processing, and character processing.
@@ -112,22 +122,23 @@ ThreadError otPlatUartEnable(void)
         termios.c_cflag |= HUPCL | CREAD | CLOCAL;
 
         // "Minimum number of characters for noncanonical read"
-        termios.c_cc[VMIN]  = 1;
+        termios.c_cc[VMIN] = 1;
 
         // "Timeout in deciseconds for noncanonical read"
         termios.c_cc[VTIME] = 0;
 
         // configure baud rate
-        VerifyOrExit(cfsetispeed(&termios, B115200) == 0, perror("cfsetispeed"); error = kThreadError_Error);
+        otEXPECT_ACTION(cfsetispeed(&termios, OPENTHREAD_POSIX_UART_BAUDRATE) == 0, perror("cfsetispeed");
+                        error = OT_ERROR_GENERIC);
 
         // set configuration
-        VerifyOrExit(tcsetattr(s_in_fd, TCSANOW, &termios) == 0, perror("tcsetattr"); error = kThreadError_Error);
+        otEXPECT_ACTION(tcsetattr(s_in_fd, TCSANOW, &termios) == 0, perror("tcsetattr"); error = OT_ERROR_GENERIC);
     }
 
     if (isatty(s_out_fd))
     {
         // get current configuration
-        VerifyOrExit(tcgetattr(s_out_fd, &termios) == 0, perror("tcgetattr"); error = kThreadError_Error);
+        otEXPECT_ACTION(tcgetattr(s_out_fd, &termios) == 0, perror("tcgetattr"); error = OT_ERROR_GENERIC);
 
         // Set up the termios settings for raw mode. This turns
         // off input/output processing, line processing, and character processing.
@@ -140,10 +151,11 @@ ThreadError otPlatUartEnable(void)
         termios.c_cflag |= HUPCL | CREAD | CLOCAL;
 
         // configure baud rate
-        VerifyOrExit(cfsetospeed(&termios, B115200) == 0, perror("cfsetospeed"); error = kThreadError_Error);
+        otEXPECT_ACTION(cfsetospeed(&termios, OPENTHREAD_POSIX_UART_BAUDRATE) == 0, perror("cfsetospeed");
+                        error = OT_ERROR_GENERIC);
 
         // set configuration
-        VerifyOrExit(tcsetattr(s_out_fd, TCSANOW, &termios) == 0, perror("tcsetattr"); error = kThreadError_Error);
+        otEXPECT_ACTION(tcsetattr(s_out_fd, TCSANOW, &termios) == 0, perror("tcsetattr"); error = OT_ERROR_GENERIC);
     }
 
     return error;
@@ -154,9 +166,9 @@ exit:
     return error;
 }
 
-ThreadError otPlatUartDisable(void)
+otError otPlatUartDisable(void)
 {
-    ThreadError error = kThreadError_None;
+    otError error = OT_ERROR_NONE;
 
     close(s_in_fd);
     close(s_out_fd);
@@ -164,11 +176,11 @@ ThreadError otPlatUartDisable(void)
     return error;
 }
 
-ThreadError otPlatUartSend(const uint8_t *aBuf, uint16_t aBufLength)
+otError otPlatUartSend(const uint8_t *aBuf, uint16_t aBufLength)
 {
-    ThreadError error = kThreadError_None;
+    otError error = OT_ERROR_NONE;
 
-    VerifyOrExit(s_write_length == 0, error = kThreadError_Busy);
+    otEXPECT_ACTION(s_write_length == 0, error = OT_ERROR_BUSY);
 
     s_write_buffer = aBuf;
     s_write_length = aBufLength;
@@ -212,12 +224,11 @@ void platformUartUpdateFdSet(fd_set *aReadFdSet, fd_set *aWriteFdSet, fd_set *aE
 
 void platformUartProcess(void)
 {
-    ssize_t rval;
-    const int error_flags = POLLERR | POLLNVAL | POLLHUP;
-    struct pollfd pollfd[] =
-    {
-        { s_in_fd,  POLLIN  | error_flags, 0 },
-        { s_out_fd, POLLOUT | error_flags, 0 },
+    ssize_t       rval;
+    const int     error_flags = POLLERR | POLLNVAL | POLLHUP;
+    struct pollfd pollfd[]    = {
+        {s_in_fd, POLLIN | error_flags, 0},
+        {s_out_fd, POLLOUT | error_flags, 0},
     };
 
     errno = 0;
@@ -261,19 +272,67 @@ void platformUartProcess(void)
         {
             rval = write(s_out_fd, s_write_buffer, s_write_length);
 
-            if (rval <= 0)
+            if (rval >= 0)
+            {
+                s_write_buffer += (uint16_t)rval;
+                s_write_length -= (uint16_t)rval;
+
+                if (s_write_length == 0)
+                {
+                    otPlatUartSendDone();
+                }
+            }
+            else if (errno != EINTR)
             {
                 perror("write");
                 exit(EXIT_FAILURE);
             }
-
-            s_write_buffer += (uint16_t)rval;
-            s_write_length -= (uint16_t)rval;
-
-            if (s_write_length == 0)
-            {
-                otPlatUartSendDone();
-            }
         }
     }
 }
+#endif // OPENTHREAD_POSIX_VIRTUAL_TIME_UART == 0
+
+#if OPENTHREAD_CONFIG_ENABLE_DEBUG_UART && (OPENTHREAD_CONFIG_LOG_OUTPUT == OPENTHREAD_CONFIG_LOG_OUTPUT_DEBUG_UART)
+
+static FILE *posix_logfile;
+
+otError otPlatDebugUart_logfile(const char *filename)
+{
+    posix_logfile = fopen(filename, "wt");
+
+    return posix_logfile ? OT_ERROR_NONE : OT_ERROR_FAILED;
+}
+
+void otPlatDebugUart_putchar_raw(int c)
+{
+    FILE *fp;
+
+    /* note: log file will have a mix of cr/lf and
+     * in some/many cases duplicate cr because in
+     * some cases the log function {ie: Mbed} already
+     * includes the CR or LF... but other log functions
+     * do not include cr/lf and expect it appended
+     */
+    fp = posix_logfile;
+
+    if (fp != NULL)
+    {
+        /* log is lost ... until a file is setup */
+        fputc(c, fp);
+        /* we could "fflush" but will not */
+    }
+}
+
+int otPlatDebugUart_kbhit(void)
+{
+    /* not supported */
+    return 0;
+}
+
+int otPlatDebugUart_getc(void)
+{
+    /* not supported */
+    return -1;
+}
+
+#endif

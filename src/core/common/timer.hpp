@@ -34,18 +34,21 @@
 #ifndef TIMER_HPP_
 #define TIMER_HPP_
 
+#include "openthread-core-config.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
-#include <openthread-types.h>
-#include <common/tasklet.hpp>
-#include <platform/alarm.h>
+#include <openthread/platform/alarm-micro.h>
+#include <openthread/platform/alarm-milli.h>
 
-namespace Thread {
+#include "common/debug.hpp"
+#include "common/locator.hpp"
+#include "common/tasklet.hpp"
 
-namespace Ip6 { class Ip6; }
+namespace ot {
 
-class Timer;
+class TimerMilliScheduler;
 
 /**
  * @addtogroup core-timer
@@ -58,156 +61,164 @@ class Timer;
  */
 
 /**
- * This class implements the timer scheduler.
- *
- */
-class TimerScheduler
-{
-    friend class Timer;
-
-public:
-    /**
-     * This constructor initializes the object.
-     *
-     */
-    TimerScheduler(void);
-
-    /**
-     * This method adds a timer instance to the timer scheduler.
-     *
-     * @param[in]  aTimer  A reference to the timer instance.
-     *
-     */
-    void Add(Timer &aTimer);
-
-    /**
-     * This method removes a timer instance to the timer scheduler.
-     *
-     * @param[in]  aTimer  A reference to the timer instance.
-     *
-     */
-    void Remove(Timer &aTimer);
-
-    /**
-     * This method returns whether or not the timer instance is already added.
-     *
-     * @retval TRUE   If the timer instance is already added.
-     * @retval FALSE  If the timer instance is not added.
-     *
-     */
-    bool IsAdded(const Timer &aTimer);
-
-    /**
-     * This method processes all running timers.
-     *
-     * @param[in]  aContext  A pointer to arbitrary context information.
-     *
-     */
-    void FireTimers(void);
-
-    /**
-     * This method returns the pointer to the parent Ip6 structure.
-     *
-     * @returns The pointer to the parent Ip6 structure.
-     *
-     */
-    Ip6::Ip6 *GetIp6();
-
-private:
-    void SetAlarm(void);
-
-    /**
-     * This method compares two timers and returns a value to indicate
-     * which timer will fire earlier.
-     *
-     * @param[in] aTimerA   The first timer for comparison.
-     * @param[in] aTimerB   The second timer for comparison.
-     *
-     * @returns true if aTimerA will fire before aTimerB.
-     * @returns false if aTimerA will fire at the same time or after aTimerB.
-     */
-    static bool TimerCompare(const Timer &aTimerA, const Timer &aTimerB);
-
-    Timer *mHead;
-};
-
-/**
  * This class implements a timer.
  *
  */
-class Timer
+class Timer : public InstanceLocator, public OwnerLocator
 {
     friend class TimerScheduler;
 
 public:
+    static const uint32_t kMaxDt =
+        (1UL << 31) - 1; ///< Maximum permitted value for parameter `aDt` in `Start` and `StartAt` method.
+    static const uint32_t kForeverDt = 0xffffffff; ///< The special forever `aDt` value.
+
     /**
      * This function pointer is called when the timer expires.
      *
-     * @param[in]  aContext  A pointer to arbitrary context information.
+     * @param[in]  aTimer    A reference to the expired timer instance.
+     *
      */
-    typedef void (*Handler)(void *aContext);
+    typedef void (*Handler)(Timer &aTimer);
 
     /**
      * This constructor creates a timer instance.
      *
-     * @param[in]  aScheduler  A reference to the timer scheduler.
+     * @param[in]  aInstance   A reference to the OpenThread instance.
      * @param[in]  aHandler    A pointer to a function that is called when the timer expires.
-     * @param[in]  aContext    A pointer to arbitrary context information.
+     * @param[in]  aOwner      A pointer to owner of the `Timer` object.
      *
      */
-    Timer(TimerScheduler &aScheduler, Handler aHandler, void *aContext):
-        mScheduler(aScheduler),
-        mHandler(aHandler),
-        mContext(aContext),
-        mT0(0),
-        mDt(0),
-        mNext(NULL) {
+    Timer(Instance &aInstance, Handler aHandler, void *aOwner)
+        : InstanceLocator(aInstance)
+        , OwnerLocator(aOwner)
+        , mHandler(aHandler)
+        , mFireTime(0)
+        , mNext(this)
+    {
     }
 
     /**
-     * This method returns the start time in milliseconds for the timer.
+     * This method returns the fire time of the timer.
      *
-     * @returns The start time in milliseconds.
-     *
-     */
-    uint32_t Gett0(void) const { return mT0; }
-
-    /**
-     * This method returns the delta time in milliseconds for the timer.
-     *
-     * @returns The delta time.
+     * @returns The fire time in milliseconds.
      *
      */
-    uint32_t Getdt(void) const { return mDt; }
+    uint32_t GetFireTime(void) const { return mFireTime; }
 
     /**
      * This method indicates whether or not the timer instance is running.
      *
      * @retval TRUE   If the timer is running.
      * @retval FALSE  If the timer is not running.
+     *
      */
-    bool IsRunning(void) const { return mScheduler.IsAdded(*this); }
+    bool IsRunning(void) const { return (mNext != this); }
+
+protected:
+    /**
+     * This method indicates if the fire time of this timer is strictly before the fire time of a second given timer.
+     *
+     * @param[in]  aSecondTimer   A reference to the second timer object.
+     * @param[in]  aNow           The current time (milliseconds or microsecond, depending on timer type).
+     *
+     * @retval TRUE  If the fire time of this timer object is strictly before aTimer's fire time
+     * @retval FALSE If the fire time of this timer object is the same or after aTimer's fire time.
+     *
+     */
+    bool DoesFireBefore(const Timer &aSecondTimer, uint32_t aNow);
+
+    void Fired(void) { mHandler(*this); }
+
+    Handler  mHandler;
+    uint32_t mFireTime;
+    Timer *  mNext;
+};
+
+/**
+ * This class implements the millisecond timer.
+ *
+ */
+class TimerMilli : public Timer
+{
+public:
+    /**
+     * This constructor creates a millisecond timer instance.
+     *
+     * @param[in]  aInstance   A reference to the OpenThread instance.
+     * @param[in]  aHandler    A pointer to a function that is called when the timer expires.
+     * @param[in]  aOwner      A pointer to the owner of the `TimerMilli` object.
+     *
+     */
+    TimerMilli(Instance &aInstance, Handler aHandler, void *aOwner)
+        : Timer(aInstance, aHandler, aOwner)
+    {
+    }
 
     /**
      * This method schedules the timer to fire a @p dt milliseconds from now.
      *
      * @param[in]  aDt  The expire time in milliseconds from now.
+     *                  (aDt must be smaller than or equal to kMaxDt).
+     *
      */
     void Start(uint32_t aDt) { StartAt(GetNow(), aDt); }
 
     /**
-     * This method schedules the timer to fire at @p dt milliseconds from @p t0.
+     * This method schedules the timer to fire at @p aDt milliseconds from @p aT0.
      *
      * @param[in]  aT0  The start time in milliseconds.
-     * @param[in]  aDt  The expire time in milliseconds from @p t0.
+     * @param[in]  aDt  The expire time in milliseconds from @p aT0.
+     *                  (aDt must be smaller than or equal to kMaxDt).
+     *
      */
-    void StartAt(uint32_t aT0, uint32_t aDt) { mT0 = aT0; mDt = aDt; mScheduler.Add(*this); }
+    void StartAt(uint32_t aT0, uint32_t aDt);
 
     /**
      * This method stops the timer.
      *
      */
-    void Stop(void) { mScheduler.Remove(*this); }
+    void Stop(void);
+
+    /**
+     * This static method returns the time diff in milliseconds between @p aStart and @p aEnd.
+     *
+     * @param[in]   aStart  The start time.
+     * @param[in]   aEnd    The end time.
+     *
+     * @returns The time diff in milliseconds.
+     *
+     */
+    static int32_t Diff(uint32_t aStart, uint32_t aEnd)
+    {
+        uint32_t diff = aEnd - aStart;
+        return reinterpret_cast<int32_t &>(diff);
+    }
+
+    /**
+     * This static method returns the time elapsed in milliseconds from @p aStart to @p aEnd.
+     *
+     * @note This method assumes @p aEnd is after @p aStart.
+     *
+     * @param[in]   aStart  The start time.
+     * @param[in]   aEnd    The end time.
+     *
+     * @returns The elapsed time in milliseconds.
+     *
+     */
+    static uint32_t Elapsed(uint32_t aStart, uint32_t aEnd) { return aEnd - aStart; }
+
+    /**
+     * This static method returns the time passed in milliseconds since @p aStart.
+     *
+     * @note This method assumes now is after @p aStart.
+     *
+     * @param[in]   aStart  The start time.
+     *
+     * @returns The elapsed time in milliseconds.
+     *
+     */
+    static uint32_t Elapsed(uint32_t aStart) { return Elapsed(aStart, GetNow()); }
 
     /**
      * This static method returns the current time in milliseconds.
@@ -215,7 +226,7 @@ public:
      * @returns The current time in milliseconds.
      *
      */
-    static uint32_t GetNow(void) { return otPlatAlarmGetNow(); }
+    static uint32_t GetNow(void) { return otPlatAlarmMilliGetNow(); }
 
     /**
      * This static method returns the number of milliseconds given seconds.
@@ -232,39 +243,282 @@ public:
      *
      */
     static uint32_t MsecToSec(uint32_t aMilliseconds) { return aMilliseconds / 1000u; }
+};
 
+/**
+ * This class implements a millisecond timer that also maintains a user context pointer.
+ *
+ * In typical `TimerMilli`/`TimerMicro` use, in the timer callback handler, the owner of the timer is determined using
+ * `GetOwner<Type>` method. This method works if there is a single instance of `Type` within OpenThread instance
+ * hierarchy. The `TimerMilliContext` is intended for cases where there may be multiple instances of the same class/type
+ * using a timer object. `TimerMilliContext` will store a context `void *` information.
+ *
+ */
+class TimerMilliContext : public TimerMilli
+{
+public:
     /**
-     * This static method returns the number of milliseconds given hours.
+     * This constructor creates a millisecond timer that also maintains a user context pointer.
      *
-     * @returns The number of milliseconds.
+     * @param[in]  aInstance   A reference to the OpenThread instance.
+     * @param[in]  aHandler    A pointer to a function that is called when the timer expires.
+     * @param[in]  aContext    A pointer to an arbitrary context information.
      *
      */
-    static uint32_t HoursToMsec(uint32_t aHours) { return SecToMsec(aHours * 3600u); }
+    TimerMilliContext(Instance &aInstance, Handler aHandler, void *aContext)
+        : TimerMilli(aInstance, aHandler, aContext)
+        , mContext(aContext)
+    {
+    }
 
     /**
-     * This static method returns the number of hours given milliseconds.
+     * This method returns the pointer to the arbitrary context information.
      *
-     * @returns The number of hours.
+     * @returns Pointer to the arbitrary context information.
      *
      */
-    static uint32_t MsecToHours(uint32_t aMilliseconds) { return MsecToSec(aMilliseconds / 3600u); }
+    void *GetContext(void) { return mContext; }
 
 private:
-    void Fired(void) { mHandler(mContext); }
-
-    TimerScheduler &mScheduler;
-    Handler         mHandler;
-    void           *mContext;
-    uint32_t        mT0;
-    uint32_t        mDt;
-    Timer          *mNext;
+    void *mContext;
 };
+
+/**
+ * This class implements the base timer scheduler.
+ *
+ */
+class TimerScheduler : public InstanceLocator
+{
+    friend class Timer;
+
+public:
+    /**
+     * This static method compares two times and indicates if the first time is strictly before (earlier) than the
+     * second time.
+     *
+     * This method requires that the difference between the two given times to be smaller than kMaxDt.
+     *
+     * @param[in] aTimerA   The first time for comparison.
+     * @param[in] aTimerB   The second time for comparison.
+     *
+     * @returns TRUE  if aTimeA is before aTimeB.
+     * @returns FALSE if aTimeA is same time or after aTimeB.
+     *
+     */
+    static bool IsStrictlyBefore(uint32_t aTimeA, uint32_t aTimeB);
+
+protected:
+    /**
+     * The Alarm APIs definition
+     *
+     */
+    struct AlarmApi
+    {
+        void (*AlarmStartAt)(otInstance *aInstance, uint32_t aT0, uint32_t aDt);
+        void (*AlarmStop)(otInstance *aInstance);
+        uint32_t (*AlarmGetNow)(void);
+    };
+
+    /**
+     * This constructor initializes the object.
+     *
+     * @param[in]  aInstance  A reference to the instance object.
+     *
+     */
+    explicit TimerScheduler(Instance &aInstance)
+        : InstanceLocator(aInstance)
+        , mHead(NULL)
+    {
+    }
+
+    /**
+     * This method adds a timer instance to the timer scheduler.
+     *
+     * @param[in]  aTimer     A reference to the timer instance.
+     * @param[in]  aAlarmApi  A reference to the Alarm APIs.
+     *
+     */
+    void Add(Timer &aTimer, const AlarmApi &aAlarmApi);
+
+    /**
+     * This method removes a timer instance to the timer scheduler.
+     *
+     * @param[in]  aTimer     A reference to the timer instance.
+     * @param[in]  aAlarmApi  A reference to the Alarm APIs.
+     *
+     */
+    void Remove(Timer &aTimer, const AlarmApi &aAlarmApi);
+
+    /**
+     * This method processes the running timers.
+     *
+     * @param[in]  aAlarmApi  A reference to the Alarm APIs.
+     *
+     */
+    void ProcessTimers(const AlarmApi &aAlarmApi);
+
+    /**
+     * This method sets the platform alarm based on timer at front of the list.
+     *
+     * @param[in]  aAlarmApi  A reference to the Alarm APIs.
+     *
+     */
+    void SetAlarm(const AlarmApi &aAlarmApi);
+
+    Timer *mHead;
+};
+
+/**
+ * This class implements the millisecond timer scheduler.
+ *
+ */
+class TimerMilliScheduler : public TimerScheduler
+{
+public:
+    /**
+     * This constructor initializes the object.
+     *
+     * @param[in]  aInstance  A reference to the instance object.
+     *
+     */
+    explicit TimerMilliScheduler(Instance &aInstance)
+        : TimerScheduler(aInstance)
+    {
+    }
+
+    /**
+     * This method adds a timer instance to the timer scheduler.
+     *
+     * @param[in]  aTimer  A reference to the timer instance.
+     *
+     */
+    void Add(TimerMilli &aTimer) { TimerScheduler::Add(aTimer, sAlarmMilliApi); }
+
+    /**
+     * This method removes a timer instance to the timer scheduler.
+     *
+     * @param[in]  aTimer  A reference to the timer instance.
+     *
+     */
+    void Remove(TimerMilli &aTimer) { TimerScheduler::Remove(aTimer, sAlarmMilliApi); };
+
+    /**
+     * This method processes the running timers.
+     *
+     */
+    void ProcessTimers(void) { TimerScheduler::ProcessTimers(sAlarmMilliApi); }
+
+private:
+    static const AlarmApi sAlarmMilliApi;
+};
+
+#if OPENTHREAD_CONFIG_ENABLE_PLATFORM_USEC_TIMER
+class TimerMicroScheduler;
+
+/**
+ * This class implements the microsecond timer.
+ *
+ */
+class TimerMicro : public Timer
+{
+public:
+    /**
+     * This constructor creates a timer instance.
+     *
+     * @param[in]  aInstance   A reference to the OpenThread instance.
+     * @param[in]  aHandler    A pointer to a function that is called when the timer expires.
+     * @param[in]  aOwner      A pointer to owner of the `TimerMicro` object.
+     *
+     */
+    TimerMicro(Instance &aInstance, Handler aHandler, void *aOwner)
+        : Timer(aInstance, aHandler, aOwner)
+    {
+    }
+
+    /**
+     * This method schedules the timer to fire a @p aDt microseconds from now.
+     *
+     * @param[in]  aDt  The expire time in microseconds from now.
+     *                  (aDt must be smaller than or equal to kMaxDt).
+     *
+     */
+    void Start(uint32_t aDt) { StartAt(GetNow(), aDt); }
+
+    /**
+     * This method schedules the timer to fire at @p aDt microseconds from @p aT0.
+     *
+     * @param[in]  aT0  The start time in microseconds.
+     * @param[in]  aDt  The expire time in microseconds from @p aT0.
+     *                  (aDt must be smaller than or equal to kMaxDt).
+     *
+     */
+    void StartAt(uint32_t aT0, uint32_t aDt);
+
+    /**
+     * This method stops the timer.
+     *
+     */
+    void Stop(void);
+
+    /**
+     * This static method returns the current time in microseconds.
+     *
+     * @returns The current time in microseconds.
+     *
+     */
+    static uint32_t GetNow(void) { return otPlatAlarmMicroGetNow(); }
+};
+
+/**
+ * This class implements the microsecond timer scheduler.
+ *
+ */
+class TimerMicroScheduler : public TimerScheduler
+{
+public:
+    /**
+     * This constructor initializes the object.
+     *
+     * @param[in]  aInstance  A reference to the instance object.
+     *
+     */
+    TimerMicroScheduler(Instance &aInstance)
+        : TimerScheduler(aInstance)
+    {
+    }
+
+    /**
+     * This method adds a timer instance to the timer scheduler.
+     *
+     * @param[in]  aTimer  A reference to the timer instance.
+     *
+     */
+    void Add(TimerMicro &aTimer) { TimerScheduler::Add(aTimer, sAlarmMicroApi); }
+
+    /**
+     * This method removes a timer instance to the timer scheduler.
+     *
+     * @param[in]  aTimer  A reference to the timer instance.
+     *
+     */
+    void Remove(TimerMicro &aTimer) { TimerScheduler::Remove(aTimer, sAlarmMicroApi); };
+
+    /**
+     * This method processes the running timers.
+     *
+     */
+    void ProcessTimers(void) { TimerScheduler::ProcessTimers(sAlarmMicroApi); }
+
+private:
+    static const AlarmApi sAlarmMicroApi;
+};
+#endif // OPENTHREAD_CONFIG_ENABLE_PLATFORM_USEC_TIMER
 
 /**
  * @}
  *
  */
 
-}  // namespace Thread
+} // namespace ot
 
-#endif  // TIMER_HPP_
+#endif // TIMER_HPP_

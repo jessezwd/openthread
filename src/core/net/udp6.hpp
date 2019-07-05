@@ -34,10 +34,14 @@
 #ifndef UDP6_HPP_
 #define UDP6_HPP_
 
-#include <openthread.h>
-#include <net/ip6_headers.hpp>
+#include "openthread-core-config.h"
 
-namespace Thread {
+#include <openthread/udp.h>
+
+#include "common/locator.hpp"
+#include "net/ip6_headers.hpp"
+
+namespace ot {
 namespace Ip6 {
 
 class Udp;
@@ -53,10 +57,43 @@ class Udp;
  */
 
 /**
+ * This class implements a UDP receiver.
+ *
+ */
+class UdpReceiver : public otUdpReceiver
+{
+    friend class Udp;
+
+public:
+    /**
+     * This constructor initializes the object.
+     *
+     * @param[in]   aUdpHandler     A pointer to the function to handle UDP message.
+     * @param[in]   aContext        A pointer to arbitrary context information.
+     *
+     */
+    UdpReceiver(otUdpHandler aHandler, void *aContext)
+    {
+        mNext    = NULL;
+        mHandler = aHandler;
+        mContext = aContext;
+    }
+
+private:
+    UdpReceiver *GetNext(void) { return static_cast<UdpReceiver *>(mNext); }
+    void         SetNext(UdpReceiver *aReceiver) { mNext = static_cast<otUdpReceiver *>(aReceiver); }
+
+    bool HandleMessage(Message &aMessage, const MessageInfo &aMessageInfo)
+    {
+        return mHandler(mContext, &aMessage, &aMessageInfo);
+    }
+};
+
+/**
  * This class implements a UDP/IPv6 socket.
  *
  */
-class UdpSocket: public otUdpSocket
+class UdpSocket : public otUdpSocket, public InstanceLocator
 {
     friend class Udp;
 
@@ -67,17 +104,21 @@ public:
      * @param[in]  aUdp  A reference to the UDP transport object.
      *
      */
-    UdpSocket(Udp &aUdp);
+    explicit UdpSocket(Udp &aUdp);
 
     /**
      * This method returns a new UDP message with sufficient header space reserved.
      *
+     * @note If @p aSettings is 'NULL', the link layer security is enabled and the message priority is set to
+     * OT_MESSAGE_PRIORITY_NORMAL by default.
+     *
      * @param[in]  aReserved  The number of header bytes to reserve after the UDP header.
+     * @param[in]  aSettings  A pointer to the message settings or NULL to set default settings.
      *
      * @returns A pointer to the message or NULL if no buffers are available.
      *
      */
-    Message *NewMessage(uint16_t aReserved);
+    Message *NewMessage(uint16_t aReserved, const otMessageSettings *aSettings = NULL);
 
     /**
      * This method opens the UDP socket.
@@ -85,30 +126,51 @@ public:
      * @param[in]  aHandler  A pointer to a function that is called when receiving UDP messages.
      * @param[in]  aContext  A pointer to arbitrary context information.
      *
-     * @retval kThreadError_None     Successfully opened the socket.
-     * @retval kThreadError_Already  The socket is already open.
+     * @retval OT_ERROR_NONE     Successfully opened the socket.
+     * @retval OT_ERROR_ALREADY  The socket is already open.
      *
      */
-    ThreadError Open(otUdpReceive aHandler, void *aContext);
+    otError Open(otUdpReceive aHandler, void *aContext);
 
     /**
      * This method binds the UDP socket.
      *
      * @param[in]  aSockAddr  A reference to the socket address.
      *
-     * @retval kThreadError_None  Successfully bound the socket.
+     * @retval OT_ERROR_NONE    Successfully bound the socket.
+     * @retval OT_ERROR_FAILED  Failed to bind UDP Socket.
      *
      */
-    ThreadError Bind(const SockAddr &aSockAddr);
+    otError Bind(const SockAddr &aSockAddr);
+
+    /**
+     * This method indicates whether or not the socket is bound.
+     *
+     * @retval TRUE if the socket is bound (i.e. source port is non-zero).
+     * @retval FALSE if the socket is not bound (source port is zero).
+     *
+     */
+    bool IsBound(void) const { return mSockName.mPort != 0; }
+
+    /**
+     * This method connects the UDP socket.
+     *
+     * @param[in]  aSockAddr  A reference to the socket address.
+     *
+     * @retval OT_ERROR_NONE    Successfully connected the socket.
+     * @retval OT_ERROR_FAILED  Failed to connect UDP Socket.
+     *
+     */
+    otError Connect(const SockAddr &aSockAddr);
 
     /**
      * This method closes the UDP socket.
      *
-     * @retval kThreadError_None  Successfully closed the UDP socket.
-     * @retval kThreadErrorBusy   The socket is already closed.
+     * @retval OT_ERROR_NONE    Successfully closed the UDP socket.
+     * @retval OT_ERROR_FAILED  Failed to close UDP Socket.
      *
      */
-    ThreadError Close(void);
+    otError Close(void);
 
     /**
      * This method sends a UDP message.
@@ -116,11 +178,12 @@ public:
      * @param[in]  aMessage      The message to send.
      * @param[in]  aMessageInfo  The message info associated with @p aMessage.
      *
-     * @retval kThreadError_None    Successfully sent the UDP message.
-     * @retval kThreadError_NoBufs  Insufficient available buffer to add the UDP and IPv6 headers.
+     * @retval OT_ERROR_NONE          Successfully sent the UDP message.
+     * @retval OT_ERROR_INVALID_ARGS  If no peer is specified in @p aMessageInfo or by connect().
+     * @retval OT_ERROR_NO_BUFS       Insufficient available buffer to add the UDP and IPv6 headers.
      *
      */
-    ThreadError SendTo(Message &aMessage, const MessageInfo &aMessageInfo);
+    otError SendTo(Message &aMessage, const MessageInfo &aMessageInfo);
 
     /**
      * This method returns the local socket address.
@@ -140,9 +203,10 @@ public:
 
 private:
     UdpSocket *GetNext(void) { return static_cast<UdpSocket *>(mNext); }
-    void SetNext(UdpSocket *socket) { mNext = static_cast<otUdpSocket *>(socket); }
+    void       SetNext(UdpSocket *socket) { mNext = static_cast<otUdpSocket *>(socket); }
 
-    void HandleUdpReceive(Message &aMessage, const MessageInfo &aMessageInfo) {
+    void HandleUdpReceive(Message &aMessage, const MessageInfo &aMessageInfo)
+    {
         mHandler(mContext, &aMessage, &aMessageInfo);
     }
 };
@@ -151,7 +215,7 @@ private:
  * This class implements core UDP message handling.
  *
  */
-class Udp
+class Udp : public InstanceLocator
 {
     friend class UdpSocket;
 
@@ -159,30 +223,48 @@ public:
     /**
      * This constructor initializes the object.
      *
-     * @param[in]  aIp6  A reference to the IPv6 network object.
+     * @param[in]  aIp6  A reference to OpenThread instance.
      *
      */
-    Udp(Ip6 &aIp6);
+    explicit Udp(Instance &aInstance);
+
+    /**
+     * This method adds a UDP receiver.
+     *
+     * @param[in]  aReceiver  A reference to the UDP receiver.
+     *
+     * @retval OT_ERROR_NONE    Successfully added the UDP receiver.
+     * @retval OT_ERROR_ALREADY The UDP receiver was already added.
+     *
+     */
+    otError AddReceiver(UdpReceiver &aReceiver);
+
+    /**
+     * This method removes a UDP receiver.
+     *
+     * @param[in]  aReceiver  A reference to the UDP receiver.
+     *
+     * @retval OT_ERROR_NONE        Successfully removed the UDP receiver.
+     * @retval OT_ERROR_NOT_FOUND   The UDP receiver was not added.
+     *
+     */
+    otError RemoveReceiver(UdpReceiver &aReceiver);
 
     /**
      * This method adds a UDP socket.
      *
      * @param[in]  aSocket  A reference to the UDP socket.
      *
-     * @retval kThreadError_None  Successfully added the UDP socket.
-     *
      */
-    ThreadError AddSocket(UdpSocket &aSocket);
+    void AddSocket(UdpSocket &aSocket);
 
     /**
      * This method removes a UDP socket.
      *
      * @param[in]  aSocket  A reference to the UDP socket.
      *
-     * @retval kThreadError_None  Successfully removed the UDP socket.
-     *
      */
-    ThreadError RemoveSocket(UdpSocket &aSocket);
+    void RemoveSocket(UdpSocket &aSocket);
 
     /**
      * This method returns a new ephemeral port.
@@ -196,11 +278,12 @@ public:
      * This method returns a new UDP message with sufficient header space reserved.
      *
      * @param[in]  aReserved  The number of header bytes to reserve after the UDP header.
+     * @param[in]  aPriority  The priority of the message.
      *
      * @returns A pointer to the message or NULL if no buffers are available.
      *
      */
-    Message *NewMessage(uint16_t aReserved);
+    Message *NewMessage(uint16_t aReserved, const otMessageSettings *aSettings = NULL);
 
     /**
      * This method sends an IPv6 datagram.
@@ -209,11 +292,11 @@ public:
      * @param[in]  aMessageInfo  A reference to the message info associated with @p aMessage.
      * @param[in]  aIpProto      The Internet Protocol value.
      *
-     * @retval kThreadError_None    Successfully enqueued the message into an output interface.
-     * @retval kThreadError_NoBufs  Insufficient available buffer to add the IPv6 headers.
+     * @retval OT_ERROR_NONE     Successfully enqueued the message into an output interface.
+     * @retval OT_ERROR_NO_BUFS  Insufficient available buffer to add the IPv6 headers.
      *
      */
-    ThreadError SendDatagram(Message &aMessage, MessageInfo &aMessageInfo, IpProto aIpProto);
+    otError SendDatagram(Message &aMessage, MessageInfo &aMessageInfo, IpProto aIpProto);
 
     /**
      * This method handles a received UDP message.
@@ -221,34 +304,63 @@ public:
      * @param[in]  aMessage      A reference to the UDP message to process.
      * @param[in]  aMessageInfo  A reference to the message info associated with @p aMessage.
      *
-     * @retval kThreadError_None  Successfully processed the UDP message.
-     * @retval kThreadError_Drop  Could not fully process the UDP message.
+     * @retval OT_ERROR_NONE  Successfully processed the UDP message.
+     * @retval OT_ERROR_DROP  Could not fully process the UDP message.
      *
      */
-    ThreadError HandleMessage(Message &aMessage, MessageInfo &aMessageInfo);
+    otError HandleMessage(Message &aMessage, MessageInfo &aMessageInfo);
+
+    /**
+     * This method handles a received UDP message with offset set to the payload.
+     *
+     * @param[in]  aMessage      A reference to the UDP message to process.
+     * @param[in]  aMessageInfo  A reference to the message info associated with @p aMessage.
+     *
+     */
+    void HandlePayload(Message &aMessage, MessageInfo &aMessageInfo);
 
     /**
      * This method updates the UDP checksum.
      *
-     * @param[in]  aMessage               A reference to the UDP message.
-     * @param[in]  aPseudoHeaderChecksum  The pseudo-header checksum value.
-     *
-     * @retval kThreadError_None         Successfully updated the UDP checksum.
-     * @retval kThreadError_InvalidArgs  The message was invalid.
+     * @param[in]  aMessage   A reference to the UDP message.
+     * @param[in]  aChecksum  The pseudo-header checksum value.
      *
      */
-    ThreadError UpdateChecksum(Message &aMessage, uint16_t aPseudoHeaderChecksum);
+    void UpdateChecksum(Message &aMessage, uint16_t aChecksum);
+
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
+    otUdpSocket *GetUdpSockets(void) { return mSockets; }
+#endif
+
+#if OPENTHREAD_ENABLE_UDP_FORWARD
+    /**
+     * This method sets the forward sender.
+     *
+     * @param[in]   aForwarder  A function pointer to forward UDP packets.
+     * @param[in]   aContext    A pointer to arbitrary context information.
+     *
+     */
+    void SetUdpForwarder(otUdpForwarder aForwarder, void *aContext)
+    {
+        mUdpForwarder        = aForwarder;
+        mUdpForwarderContext = aContext;
+    }
+#endif // OPENTHREAD_ENABLE_UDP_FORWARD
 
 private:
     enum
     {
-        kDynamicPortMin = 49152,  ///< Service Name and Transport Protocol Port Number Registry
-        kDynamicPortMax = 65535,  ///< Service Name and Transport Protocol Port Number Registry
+        kDynamicPortMin = 49152, ///< Service Name and Transport Protocol Port Number Registry
+        kDynamicPortMax = 65535, ///< Service Name and Transport Protocol Port Number Registry
     };
-    uint16_t mEphemeralPort;
-    UdpSocket *mSockets;
 
-    Ip6 &mIp6;
+    uint16_t     mEphemeralPort;
+    UdpReceiver *mReceivers;
+    UdpSocket *  mSockets;
+#if OPENTHREAD_ENABLE_UDP_FORWARD
+    void *         mUdpForwarderContext;
+    otUdpForwarder mUdpForwarder;
+#endif
 };
 
 OT_TOOL_PACKED_BEGIN
@@ -265,7 +377,7 @@ struct UdpHeaderPoD
  *
  */
 OT_TOOL_PACKED_BEGIN
-class UdpHeader: private UdpHeaderPoD
+class UdpHeader : private UdpHeaderPoD
 {
 public:
     /**
@@ -355,7 +467,7 @@ public:
  *
  */
 
-}  // namespace Ip6
-}  // namespace Thread
+} // namespace Ip6
+} // namespace ot
 
-#endif  // NET_UDP6_HPP_
+#endif // UDP6_HPP_

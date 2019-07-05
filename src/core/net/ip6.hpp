@@ -34,34 +34,37 @@
 #ifndef IP6_HPP_
 #define IP6_HPP_
 
+#include "openthread-core-config.h"
+
 #include <stddef.h>
 
-#include <openthread-ip6.h>
-#include <openthread-udp.h>
-#include <common/encoding.hpp>
-#include <common/message.hpp>
-#include <net/icmp6.hpp>
-#include <net/ip6_address.hpp>
-#include <net/ip6_headers.hpp>
-#include <net/ip6_routes.hpp>
-#include <net/ip6_mpl.hpp>
-#include <net/netif.hpp>
-#include <net/socket.hpp>
-#include <net/udp6.hpp>
+#include <openthread/ip6.h>
+#include <openthread/udp.h>
 
-using Thread::Encoding::BigEndian::HostSwap16;
-using Thread::Encoding::BigEndian::HostSwap32;
+#include "common/encoding.hpp"
+#include "common/locator.hpp"
+#include "common/message.hpp"
+#include "net/icmp6.hpp"
+#include "net/ip6_address.hpp"
+#include "net/ip6_headers.hpp"
+#include "net/ip6_mpl.hpp"
+#include "net/netif.hpp"
+#include "net/socket.hpp"
+#include "net/udp6.hpp"
 
-namespace Thread {
+namespace ot {
 
 /**
- * @namespace Thread::Ip6
+ * @namespace ot::Ip6
  *
  * @brief
  *   This namespace includes definitions for IPv6 networking.
  *
  */
 namespace Ip6 {
+
+using ot::Encoding::BigEndian::HostSwap16;
+using ot::Encoding::BigEndian::HostSwap32;
 
 /**
  * @addtogroup core-ipv6
@@ -94,29 +97,74 @@ namespace Ip6 {
  * This class implements the core IPv6 message processing.
  *
  */
-class Ip6
+class Ip6 : public InstanceLocator
 {
+    friend class ot::Instance;
+
 public:
     enum
     {
-        kDefaultHopLimit = 64,
-        kMaxDatagramLength = 1280,
+        kDefaultHopLimit   = OPENTHREAD_CONFIG_IPV6_DEFAULT_HOP_LIMIT,
+        kMaxDatagramLength = OPENTHREAD_CONFIG_IPV6_DEFAULT_MAX_DATAGRAM,
     };
 
     /**
      * This method allocates a new message buffer from the buffer pool.
      *
+     * @note If @p aSettings is 'NULL', the link layer security is enabled and the message priority is set to
+     *       OT_MESSAGE_PRIORITY_NORMAL by default.
+     *
      * @param[in]  aReserved  The number of header bytes to reserve following the IPv6 header.
+     * @param[in]  aSettings  A pointer to the message settings or NULL to set default settings.
      *
      * @returns A pointer to the message or NULL if insufficient message buffers are available.
      *
      */
-    Message *NewMessage(uint16_t aReserved);
+    Message *NewMessage(uint16_t aReserved, const otMessageSettings *aSettings = NULL);
+
+    /**
+     * This method allocates a new message buffer from the buffer pool and writes the IPv6 datagram to the message.
+     *
+     * @note If @p aSettings is NULL, the link layer security is enabled and the message priority is obtained from
+     *       IPv6 message itself.
+     *       If @p aSettings is not NULL, the @p aSetting->mPriority is ignored and obtained from IPv6 message itself.
+     *
+     * @param[in]  aData        A pointer to the IPv6 datagram buffer.
+     * @param[in]  aDataLength  The size of the IPV6 datagram buffer pointed by @p aData.
+     * @param[in]  aSettings    A pointer to the message settings or NULL to set default settings.
+     *
+     * @returns A pointer to the message or NULL if malformed IPv6 header or insufficient message buffers are available.
+     *
+     */
+    Message *NewMessage(const uint8_t *aData, uint16_t aDataLength, const otMessageSettings *aSettings);
+
+    /**
+     * This method converts the message priority level to IPv6 DSCP value.
+     *
+     * @param[in]  aPriority  The message priority level.
+     *
+     * @returns The IPv6 DSCP value.
+     *
+     */
+    static uint8_t PriorityToDscp(uint8_t aPriority);
+
+    /**
+     * This method converts the IPv6 DSCP value to message priority level.
+     *
+     * @param[in]  aDscp  The IPv6 DSCP value.
+     *
+     * @returns The message priority level.
+     *
+     */
+    static uint8_t DscpToPriority(uint8_t aDscp);
 
     /**
      * This constructor initializes the object.
+     *
+     * @param[in]  aInstance   A reference to the otInstance object.
+     *
      */
-    Ip6(void);
+    explicit Ip6(Instance &aInstance);
 
     /**
      * This method sends an IPv6 datagram.
@@ -125,28 +173,45 @@ public:
      * @param[in]  aMessageInfo  A reference to the message info associated with @p aMessage.
      * @param[in]  aIpProto      The Internet Protocol value.
      *
-     * @retval kThreadError_None    Successfully enqueued the message into an output interface.
-     * @retval kThreadError_NoBufs  Insufficient available buffer to add the IPv6 headers.
+     * @retval OT_ERROR_NONE     Successfully enqueued the message into an output interface.
+     * @retval OT_ERROR_NO_BUFS  Insufficient available buffer to add the IPv6 headers.
      *
      */
-    ThreadError SendDatagram(Message &aMessage, MessageInfo &aMessageInfo, IpProto aIpProto);
+    otError SendDatagram(Message &aMessage, MessageInfo &aMessageInfo, IpProto aIpProto);
+
+    /**
+     * This method sends a raw IPv6 datagram with a fully formed IPv6 header.
+     *
+     * The caller transfers ownership of @p aMessage when making this call. OpenThread will free @p aMessage when
+     * processing is complete, including when a value other than `OT_ERROR_NONE` is returned.
+     *
+     * @param[in]  aMessage          A reference to the message.
+     *
+     * @retval OT_ERROR_NONE      Successfully processed the message.
+     * @retval OT_ERROR_DROP      Message was well-formed but not fully processed due to packet processing rules.
+     * @retval OT_ERROR_NO_BUFS   Could not allocate necessary message buffers when processing the datagram.
+     * @retval OT_ERROR_NO_ROUTE  No route to host.
+     * @retval OT_ERROR_PARSE     Encountered a malformed header when processing the message.
+     *
+     */
+    otError SendRaw(Message &aMessage);
 
     /**
      * This method processes a received IPv6 datagram.
      *
      * @param[in]  aMessage          A reference to the message.
      * @param[in]  aNetif            A pointer to the network interface that received the message.
-     * @param[in]  aInterfaceId      The interface identifier of the network interface that received the message.
      * @param[in]  aLinkMessageInfo  A pointer to link-specific message information.
      * @param[in]  aFromNcpHost      TRUE if the message was submitted by the NCP host, FALSE otherwise.
      *
-     * @retval kThreadError_None   Successfully processed the message.
-     * @retval kThreadError_Drop   Message processing failed and the message should be dropped.
+     * @retval OT_ERROR_NONE      Successfully processed the message.
+     * @retval OT_ERROR_DROP      Message was well-formed but not fully processed due to packet processing rules.
+     * @retval OT_ERROR_NO_BUFS   Could not allocate necessary message buffers when processing the datagram.
+     * @retval OT_ERROR_NO_ROUTE  No route to host.
+     * @retval OT_ERROR_PARSE     Encountered a malformed header when processing the message.
      *
      */
-    ThreadError HandleDatagram(Message &aMessage, Netif *aNetif, int8_t aInterfaceId,
-                               const void *aLinkMessageInfo, bool aFromNcpHost);
-
+    otError HandleDatagram(Message &aMessage, Netif *aNetif, const void *aLinkMessageInfo, bool aFromNcpHost);
 
     /**
      * This methods adds a full IPv6 packet to the transmit queue.
@@ -154,29 +219,6 @@ public:
      * @param aMessage A reference to the message.
      */
     void EnqueueDatagram(Message &aMessage);
-
-    /**
-     * This static method updates a checksum.
-     *
-     * @param[in]  aChecksum  The checksum value to update.
-     * @param[in]  aValue     The 16-bit value to update @p aChecksum with.
-     *
-     * @returns The updated checksum.
-     *
-     */
-    static uint16_t UpdateChecksum(uint16_t aChecksum, uint16_t aValue);
-
-    /**
-     * This static method updates a checksum.
-     *
-     * @param[in]  aChecksum  The checksum value to update.
-     * @param[in]  aBuf       A pointer to a buffer.
-     * @param[in]  aLength    The number of bytes in @p aBuf.
-     *
-     * @returns The updated checksum.
-     *
-     */
-    static uint16_t UpdateChecksum(uint16_t aChecksum, const void *aBuf, uint16_t aLength);
 
     /**
      * This static method updates a checksum.
@@ -200,8 +242,10 @@ public:
      * @returns The pseudoheader checksum.
      *
      */
-    static uint16_t ComputePseudoheaderChecksum(const Address &aSource, const Address &aDestination,
-                                                uint16_t aLength, IpProto aProto);
+    static uint16_t ComputePseudoheaderChecksum(const Address &aSource,
+                                                const Address &aDestination,
+                                                uint16_t       aLength,
+                                                IpProto        aProto);
 
     /**
      * This method registers a callback to provide received raw IPv6 datagrams.
@@ -217,7 +261,7 @@ public:
      * @sa SetReceiveIp6FilterEnabled
      *
      */
-    void SetReceiveDatagramCallback(otReceiveIp6DatagramCallback aCallback, void *aCallbackContext);
+    void SetReceiveDatagramCallback(otIp6ReceiveCallback aCallback, void *aCallbackContext);
 
     /**
      * This method indicates whether or not Thread control traffic is filtered out when delivering IPv6 datagrams
@@ -229,7 +273,7 @@ public:
      * @sa SetReceiveIp6FilterEnabled
      *
      */
-    bool IsReceiveIp6FilterEnabled(void);
+    bool IsReceiveIp6FilterEnabled(void) const { return mIsReceiveIp6FilterEnabled; }
 
     /**
      * This method sets whether or not Thread control traffic is filtered out when delivering IPv6 datagrams
@@ -241,7 +285,7 @@ public:
      * @sa IsReceiveIp6FilterEnabled
      *
      */
-    void SetReceiveIp6FilterEnabled(bool aEnabled);
+    void SetReceiveIp6FilterEnabled(bool aEnabled) { mIsReceiveIp6FilterEnabled = aEnabled; }
 
     /**
      * This method indicates whether or not IPv6 forwarding is enabled.
@@ -249,7 +293,7 @@ public:
      * @returns TRUE if IPv6 forwarding is enabled, FALSE otherwise.
      *
      */
-    bool IsForwardingEnabled(void);
+    bool IsForwardingEnabled(void) const { return mForwardingEnabled; }
 
     /**
      * This method enables/disables IPv6 forwarding.
@@ -257,58 +301,7 @@ public:
      * @param[in]  aEnable  TRUE to enable IPv6 forwarding, FALSE otherwise.
      *
      */
-    void SetForwardingEnabled(bool aEnable);
-
-    /**
-     * This method enables the network interface.
-     *
-     * @param  aNetif  A reference to the network interface.
-     *
-     * @retval kThreadError_None  Successfully enabled the network interface.
-     * @retval KThreadError_Already  The network interface was already enabled.
-     *
-     */
-    ThreadError AddNetif(Netif &aNetif);
-
-    /**
-     * This method disables the network interface.
-     *
-     * @param  aNetif  A reference to the network interface.
-     *
-     * @retval kThreadError_None  Successfully disabled the network interface.
-     * @retval KThreadError_NotFound  The network interface was already disabled.
-     *
-     */
-    ThreadError RemoveNetif(Netif &aNetif);
-
-    /**
-     * This method returns the network interface list.
-     *
-     * @returns A pointer to the network interface list.
-     *
-     */
-    Netif *GetNetifList(void);
-
-    /**
-     * This method returns the network interface identified by @p aInterfaceId.
-     *
-     * @param[in]  aInterfaceId  The network interface ID.
-     *
-     * @returns A pointer to the network interface or NULL if none is found.
-     *
-     */
-    Netif *GetNetifById(int8_t aInterfaceId);
-
-    /**
-     * This method indicates whether or not @p aAddress is assigned to a network interface.
-     *
-     * @param[in]  aAddress  A reference to the IPv6 address.
-     *
-     * @retval TRUE   If the IPv6 address is assigned to a network interface.
-     * @retval FALSE  If the IPv6 address is not assigned to any network interface.
-     *
-     */
-    bool IsUnicastAddress(const Address &aAddress);
+    void SetForwardingEnabled(bool aEnable) { mForwardingEnabled = aEnable; }
 
     /**
      * This method perform default source address selection.
@@ -321,24 +314,6 @@ public:
     const NetifUnicastAddress *SelectSourceAddress(MessageInfo &aMessageInfo);
 
     /**
-     * This method determines which network interface @p aAddress is on-link, if any.
-     *
-     * @param[in]  aAddress  A reference to the IPv6 address.
-     *
-     * @returns The network interface identifier for the on-link interface or -1 if none is found.
-     *
-     */
-    int8_t GetOnLinkNetif(const Address &aAddress);
-
-    /**
-     * This method returns the pointer to the parent otInstance structure.
-     *
-     * @returns The pointer to the parent otInstance structure.
-     *
-     */
-    otInstance *GetInstance(void);
-
-    /**
      * This method returns a reference to the send queue.
      *
      * @returns A reference to the send queue.
@@ -346,59 +321,63 @@ public:
      */
     const PriorityQueue &GetSendQueue(void) const { return mSendQueue; }
 
-    Routes mRoutes;
-    Icmp mIcmp;
-    Udp mUdp;
-    Mpl mMpl;
-
-    MessagePool mMessagePool;
-    TaskletScheduler mTaskletScheduler;
-    TimerScheduler mTimerScheduler;
+    /**
+     * This static method converts an `IpProto` enumeration to a string.
+     *
+     * @returns The string representation of an IP protocol enumeration.
+     *
+     */
+    static const char *IpProtoToString(IpProto aIpProto);
 
 private:
-    static void HandleSendQueue(void *aContext);
-    void HandleSendQueue(void);
+    enum
+    {
+        kDefaultIp6MessagePriority = Message::kPriorityNormal,
+    };
 
-    ThreadError ProcessReceiveCallback(const Message &aMessage, const MessageInfo &aMessageInfo, uint8_t aIpProto);
-    ThreadError HandleExtensionHeaders(Message &message, Header &header, uint8_t &nextHeader, bool forward,
-                                       bool receive);
-    ThreadError HandleFragment(Message &message);
-    ThreadError AddMplOption(Message &message, Header &header);
-    ThreadError AddTunneledMplOption(Message &message, Header &header, MessageInfo &messageInfo);
-    ThreadError InsertMplOption(Message &message, Header &header, MessageInfo &messageInfo);
-    ThreadError RemoveMplOption(Message &aMessage);
-    ThreadError HandleOptions(Message &message, Header &header, bool &forward);
-    ThreadError HandlePayload(Message &message, MessageInfo &messageInfo, uint8_t ipproto);
-    ThreadError ForwardMessage(Message &message, MessageInfo &messageInfo, uint8_t ipproto);
+    static void HandleSendQueue(Tasklet &aTasklet);
+    void        HandleSendQueue(void);
 
-    bool mForwardingEnabled;
+    static otError GetDatagramPriority(const uint8_t *aData, uint16_t aDataLen, uint8_t &aPriority);
+
+    otError ProcessReceiveCallback(const Message &    aMessage,
+                                   const MessageInfo &aMessageInfo,
+                                   uint8_t            aIpProto,
+                                   bool               aFromNcpHost);
+    otError HandleExtensionHeaders(Message &aMessage,
+                                   Header & aHeader,
+                                   uint8_t &aNextHeader,
+                                   bool     aForward,
+                                   bool     aReceive);
+    otError HandleFragment(Message &aMessage);
+    otError AddMplOption(Message &aMessage, Header &aHeader);
+    otError AddTunneledMplOption(Message &aMessage, Header &aHeader, MessageInfo &aMessageInfo);
+    otError InsertMplOption(Message &aMessage, Header &aHeader, MessageInfo &aMessageInfo);
+    otError RemoveMplOption(Message &aMessage);
+    otError HandleOptions(Message &aMessage, Header &aHeader, bool &aForward);
+    otError HandlePayload(Message &aMessage, MessageInfo &aMessageInfo, uint8_t aIpProto);
+    bool    ShouldForwardToThread(const MessageInfo &aMessageInfo) const;
+    bool    IsOnLink(const Address &aAddress) const;
+
+    bool                 mForwardingEnabled;
+    bool                 mIsReceiveIp6FilterEnabled;
+    otIp6ReceiveCallback mReceiveIp6DatagramCallback;
+    void *               mReceiveIp6DatagramCallbackContext;
 
     PriorityQueue mSendQueue;
-    Tasklet mSendQueueTask;
+    Tasklet       mSendQueueTask;
 
-    otReceiveIp6DatagramCallback mReceiveIp6DatagramCallback;
-    void *mReceiveIp6DatagramCallbackContext;
-    bool mIsReceiveIp6FilterEnabled;
-
-    Netif *mNetifListHead;
+    Icmp mIcmp;
+    Udp  mUdp;
+    Mpl  mMpl;
 };
-
-static inline Ip6 *Ip6FromTaskletScheduler(TaskletScheduler *aTaskletScheduler)
-{
-    return (Ip6 *)CONTAINING_RECORD(aTaskletScheduler, Ip6, mTaskletScheduler);
-}
-
-static inline Ip6 *Ip6FromTimerScheduler(TimerScheduler *aTimerScheduler)
-{
-    return (Ip6 *)CONTAINING_RECORD(aTimerScheduler, Ip6, mTimerScheduler);
-}
 
 /**
  * @}
  *
  */
 
-}  // namespace Ip6
-}  // namespace Thread
+} // namespace Ip6
+} // namespace ot
 
-#endif  // NET_IP6_HPP_
+#endif // IP6_HPP_

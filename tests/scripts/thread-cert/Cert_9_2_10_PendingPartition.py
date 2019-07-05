@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -30,6 +30,7 @@
 import time
 import unittest
 
+import config
 import node
 
 CHANNEL_INIT = 19
@@ -44,11 +45,15 @@ ROUTER1 = 3
 ED1 = 4
 SED1 = 5
 
+MTDS = [ED1, SED1]
+
 class Cert_9_2_10_PendingPartition(unittest.TestCase):
     def setUp(self):
+        self.simulator = config.create_default_simulator()
+
         self.nodes = {}
         for i in range(1,6):
-            self.nodes[i] = node.Node(i)
+            self.nodes[i] = node.Node(i, (i in MTDS), simulator=self.simulator)
 
         self.nodes[COMMISSIONER].set_active_dataset(15, channel=CHANNEL_INIT, panid=PANID_INIT)
         self.nodes[COMMISSIONER].set_mode('rsdn')
@@ -72,41 +77,46 @@ class Cert_9_2_10_PendingPartition(unittest.TestCase):
         self.nodes[ROUTER1].enable_whitelist()
         self.nodes[ROUTER1].set_router_selection_jitter(1)
 
-        self.nodes[ED1].set_active_dataset(15, channel=CHANNEL_INIT, panid=PANID_INIT)
+        self.nodes[ED1].set_channel(CHANNEL_INIT)
+        self.nodes[ED1].set_panid(PANID_INIT)
         self.nodes[ED1].set_mode('rsn')
         self.nodes[ED1].add_whitelist(self.nodes[ROUTER1].get_addr64())
         self.nodes[ED1].enable_whitelist()
 
-        self.nodes[SED1].set_active_dataset(15, channel=CHANNEL_INIT, panid=PANID_INIT)
+        self.nodes[SED1].set_channel(CHANNEL_INIT)
+        self.nodes[SED1].set_panid(PANID_INIT)
         self.nodes[SED1].set_mode('s')
         self.nodes[SED1].add_whitelist(self.nodes[ROUTER1].get_addr64())
         self.nodes[SED1].enable_whitelist()
-        self.nodes[SED1].set_timeout(3)
+        self.nodes[SED1].set_timeout(config.DEFAULT_CHILD_TIMEOUT)
 
     def tearDown(self):
         for node in list(self.nodes.values()):
             node.stop()
-        del self.nodes
+            node.destroy()
+        self.simulator.stop()
 
     def test(self):
         self.nodes[LEADER].start()
-        self.nodes[LEADER].set_state('leader')
+        self.simulator.go(5)
         self.assertEqual(self.nodes[LEADER].get_state(), 'leader')
 
         self.nodes[COMMISSIONER].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[COMMISSIONER].get_state(), 'router')
+        self.nodes[COMMISSIONER].commissioner_start()
+        self.simulator.go(3)
 
         self.nodes[ROUTER1].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ROUTER1].get_state(), 'router')
 
         self.nodes[ED1].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ED1].get_state(), 'child')
 
         self.nodes[SED1].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[SED1].get_state(), 'child')
 
         self.nodes[COMMISSIONER].send_mgmt_pending_set(pending_timestamp=30,
@@ -114,7 +124,7 @@ class Cert_9_2_10_PendingPartition(unittest.TestCase):
                                                        delay_timer=150000,
                                                        channel=CHANNEL_FINAL,
                                                        panid=PANID_FINAL)
-        time.sleep(5)
+        self.simulator.go(5)
 
         print(self.nodes[COMMISSIONER].get_channel())
         print(self.nodes[LEADER].get_channel())
@@ -124,7 +134,7 @@ class Cert_9_2_10_PendingPartition(unittest.TestCase):
 
         self.nodes[LEADER].remove_whitelist(self.nodes[ROUTER1].get_addr64())
         self.nodes[ROUTER1].remove_whitelist(self.nodes[LEADER].get_addr64())
-        time.sleep(160)
+        self.simulator.go(160)
 
         print(self.nodes[COMMISSIONER].get_channel())
         print(self.nodes[LEADER].get_channel())
@@ -146,7 +156,7 @@ class Cert_9_2_10_PendingPartition(unittest.TestCase):
 
         self.nodes[LEADER].add_whitelist(self.nodes[ROUTER1].get_addr64())
         self.nodes[ROUTER1].add_whitelist(self.nodes[LEADER].get_addr64())
-        time.sleep(60)
+        self.simulator.go(60)
 
         self.assertEqual(self.nodes[COMMISSIONER].get_state(), 'router')
         self.assertEqual(self.nodes[LEADER].get_state(), 'leader')

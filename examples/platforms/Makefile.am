@@ -1,5 +1,5 @@
 #
-#  Copyright (c) 2016, The OpenThread Authors.
+#  Copyright (c) 2017, The OpenThread Authors.
 #  All rights reserved.
 #
 #  Redistribution and use in source and binary forms, with or without
@@ -31,9 +31,20 @@ include $(abs_top_nlbuild_autotools_dir)/automake/pre.am
 # Always package (e.g. for 'make dist') these subdirectories.
 
 DIST_SUBDIRS                            = \
+    cc1352                                \
     cc2538                                \
-    da15000                               \
+    cc2650                                \
+    cc2652                                \
+    efr32mg12                             \
+    efr32mg21                             \
+    emsk                                  \
+    gp712                                 \
+    kw41z                                 \
+    nrf52811                              \
+    nrf52840                              \
     posix                                 \
+    qpg6095                               \
+    samr21                                \
     utils                                 \
     $(NULL)
 
@@ -43,24 +54,83 @@ SUBDIRS                                 = \
     utils                                 \
     $(NULL)
 
-if OPENTHREAD_EXAMPLES_POSIX
-SUBDIRS                                += posix
+if OPENTHREAD_EXAMPLES_CC1352
+SUBDIRS                                += cc1352
 endif
 
 if OPENTHREAD_EXAMPLES_CC2538
 SUBDIRS                                += cc2538
 endif
 
-if OPENTHREAD_EXAMPLES_DA15000
-SUBDIRS                                += da15000
+if OPENTHREAD_EXAMPLES_CC2650
+SUBDIRS                                += cc2650
 endif
+
+if OPENTHREAD_EXAMPLES_CC2652
+SUBDIRS                                += cc2652
+endif
+
+if OPENTHREAD_EXAMPLES_EFR32MG12
+SUBDIRS                                += efr32mg12
+endif
+
+if OPENTHREAD_EXAMPLES_EFR32MG21
+SUBDIRS                                += efr32mg21
+endif
+
+if OPENTHREAD_EXAMPLES_EMSK
+SUBDIRS                                += emsk
+endif
+
+if OPENTHREAD_EXAMPLES_GP712
+SUBDIRS                                += gp712
+endif
+
+if OPENTHREAD_EXAMPLES_KW41Z
+SUBDIRS                                += kw41z
+endif
+
+if OPENTHREAD_EXAMPLES_NRF52811
+SUBDIRS                                += nrf52811
+endif
+
+if OPENTHREAD_EXAMPLES_NRF52840
+SUBDIRS                                += nrf52840
+endif
+
+if OPENTHREAD_EXAMPLES_POSIX
+SUBDIRS                                += posix
+endif
+
+if OPENTHREAD_EXAMPLES_QPG6095
+SUBDIRS                                += qpg6095
+endif
+
+if OPENTHREAD_EXAMPLES_SAMR21
+SUBDIRS                                += samr21
+endif
+
+noinst_HEADERS                          = \
+    openthread-system.h                   \
+    $(NULL)
 
 # Always pretty (e.g. for 'make pretty') these subdirectories.
 
 PRETTY_SUBDIRS                          = \
+    cc1352                                \
     cc2538                                \
-    da15000                               \
+    cc2650                                \
+    cc2652                                \
+    efr32mg12                             \
+    efr32mg21                             \
+    emsk                                  \
+    gp712                                 \
+    kw41z                                 \
+    nrf52811                              \
+    nrf52840                              \
     posix                                 \
+    qpg6095                               \
+    samr21                                \
     utils                                 \
     $(NULL)
 

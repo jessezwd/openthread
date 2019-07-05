@@ -34,52 +34,47 @@
 #ifndef ANNOUNCE_BEGIN_CLIENT_HPP_
 #define ANNOUNCE_BEGIN_CLIENT_HPP_
 
-#include <openthread-core-config.h>
-#include <openthread-types.h>
-#include <commissioning/commissioner.h>
-#include <coap/coap_client.hpp>
-#include <net/ip6_address.hpp>
-#include <net/udp6.hpp>
+#include "openthread-core-config.h"
 
-namespace Thread {
+#include "coap/coap.hpp"
+#include "common/locator.hpp"
+#include "net/ip6_address.hpp"
+#include "net/udp6.hpp"
 
-class ThreadNetif;
+namespace ot {
 
 /**
  * This class implements handling Announce Begin Requests.
  *
  */
-class AnnounceBeginClient
+class AnnounceBeginClient : public InstanceLocator
 {
 public:
     /**
      * This constructor initializes the object.
      *
      */
-    AnnounceBeginClient(ThreadNetif &aThreadNetif);
+    explicit AnnounceBeginClient(Instance &aInstance);
 
     /**
      * This method sends a Announce Begin message.
      *
      * @param[in]  aChannelMask   The channel mask value.
-     * @param[in]  aCount         The number of energy measurements per channel.
-     * @param[in]  aPeriod        The time between energy measurements (milliseconds).
+     * @param[in]  aCount         The number of Announce messages sent per channel.
+     * @param[in]  aPeriod        The time between two successive MLE Announce transmissions (in milliseconds).
+     * @param[in]  aAddress       The destination address.
      *
-     * @retval kThreadError_None    Successfully enqueued the Announce Begin message.
-     * @retval kThreadError_NoBufs  Insufficient buffers to generate a Announce Begin message.
+     * @retval OT_ERROR_NONE     Successfully enqueued the Announce Begin message.
+     * @retval OT_ERROR_NO_BUFS  Insufficient buffers to generate a Announce Begin message.
      *
      */
-    ThreadError SendRequest(uint32_t aChannelMask, uint8_t aCount, uint16_t mPeriod, const Ip6::Address &aAddress);
-
-private:
-    ThreadNetif &mNetif;
-    Coap::Client &mCoapClient;
+    otError SendRequest(uint32_t aChannelMask, uint8_t aCount, uint16_t aPeriod, const Ip6::Address &aAddress);
 };
 
 /**
  * @}
  */
 
-}  // namespace Thread
+} // namespace ot
 
-#endif  // ANNOUNCE_BEGIN_CLIENT_HPP_
+#endif // ANNOUNCE_BEGIN_CLIENT_HPP_

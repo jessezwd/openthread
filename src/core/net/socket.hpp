@@ -34,10 +34,11 @@
 #ifndef NET_SOCKET_HPP_
 #define NET_SOCKET_HPP_
 
-#include <openthread.h>
-#include <net/ip6_address.hpp>
+#include "openthread-core-config.h"
 
-namespace Thread {
+#include "net/ip6_address.hpp"
+
+namespace ot {
 namespace Ip6 {
 
 /**
@@ -51,7 +52,7 @@ namespace Ip6 {
  * This class implements message information for an IPv6 message.
  *
  */
-class MessageInfo: public otMessageInfo
+class MessageInfo : public otMessageInfo
 {
 public:
     /**
@@ -66,7 +67,7 @@ public:
      * @returns A reference to the local socket address.
      *
      */
-    const Address &GetSockAddr(void) const { return *static_cast<const Address *>(&mSockAddr);}
+    const Address &GetSockAddr(void) const { return *static_cast<const Address *>(&mSockAddr); }
 
     /**
      * This method sets the local socket address.
@@ -98,7 +99,7 @@ public:
      * @returns A reference to the peer socket address.
      *
      */
-    Address &GetPeerAddr(void) { return *static_cast<Address *>(&mPeerAddr);}
+    Address &GetPeerAddr(void) { return *static_cast<Address *>(&mPeerAddr); }
 
     /**
      * This method returns a reference to the peer socket address.
@@ -106,7 +107,7 @@ public:
      * @returns A reference to the peer socket address.
      *
      */
-    const Address &GetPeerAddr(void) const { return *static_cast<const Address *>(&mPeerAddr);}
+    const Address &GetPeerAddr(void) const { return *static_cast<const Address *>(&mPeerAddr); }
 
     /**
      * This method sets the peer's socket address.
@@ -133,22 +134,6 @@ public:
     void SetPeerPort(uint16_t aPort) { mPeerPort = aPort; }
 
     /**
-     * This method gets the Interface ID.
-     *
-     * @returns The Interface ID.
-     *
-     */
-    int8_t GetInterfaceId(void) const { return mInterfaceId; }
-
-    /**
-     * This method sets the Interface ID.
-     *
-     * @param[in]  aInterfaceId  The Interface ID.
-     *
-     */
-    void SetInterfaceId(int8_t aInterfaceId) { mInterfaceId = aInterfaceId; }
-
-    /**
      * This method gets the Hop Limit.
      *
      * @returns The Hop Limit.
@@ -167,7 +152,7 @@ public:
     /**
      * This method returns a pointer to the Link Info.
      *
-     * @returns A poitner to the Link Info.
+     * @returns A pointer to the Link Info.
      *
      */
     const void *GetLinkInfo(void) const { return mLinkInfo; }
@@ -179,20 +164,37 @@ public:
      *
      */
     void SetLinkInfo(const void *aLinkInfo) { mLinkInfo = aLinkInfo; }
+
+    /**
+     * This method indicates whether peer is via the host interface.
+     *
+     * @retval TRUE if the peer is via the host interface.
+     * @retval FALSE if the peer is via the Thread interface.
+     *
+     */
+    bool IsHostInterface(void) const { return mIsHostInterface; }
+
+    /**
+     * This method sets whether the peer is via the host interface.
+     *
+     * @param[in]  aIsHost  TRUE if the peer is via the host interface, FALSE otherwise.
+     *
+     */
+    void SetIsHostInterface(bool aIsHost) { mIsHostInterface = aIsHost; }
 };
 
 /**
  * This class implements a socket address.
  *
  */
-class SockAddr: public otSockAddr
+class SockAddr : public otSockAddr
 {
 public:
     /**
      * This constructor initializes the object.
      *
      */
-    SockAddr(void) { memset(&mAddress, 0, sizeof(mAddress)), mPort = 0, mScopeId = 0; }
+    SockAddr(void) { memset(this, 0, sizeof(*this)); }
 
     /**
      * This method returns a reference to the IPv6 address.
@@ -215,7 +217,7 @@ public:
  * @}
  */
 
-}  // namespace Ip6
-}  // namespace Thread
+} // namespace Ip6
+} // namespace ot
 
-#endif  // NET_SOCKET_HPP_
+#endif // NET_SOCKET_HPP_

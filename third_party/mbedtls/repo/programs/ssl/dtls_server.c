@@ -34,6 +34,15 @@
 #define mbedtls_time_t     time_t
 #endif
 
+/* Uncomment out the following line to default to IPv4 and disable IPv6 */
+//#define FORCE_IPV4
+
+#ifdef FORCE_IPV4
+#define BIND_IP     "0.0.0.0"     /* Forces IPv4 */
+#else
+#define BIND_IP     "::"
+#endif
+
 #if !defined(MBEDTLS_SSL_SRV_C) || !defined(MBEDTLS_SSL_PROTO_DTLS) ||    \
     !defined(MBEDTLS_SSL_COOKIE_C) || !defined(MBEDTLS_NET_C) ||          \
     !defined(MBEDTLS_ENTROPY_C) || !defined(MBEDTLS_CTR_DRBG_C) ||        \
@@ -67,7 +76,7 @@ int main( void )
 #include "mbedtls/x509.h"
 #include "mbedtls/ssl.h"
 #include "mbedtls/ssl_cookie.h"
-#include "mbedtls/net.h"
+#include "mbedtls/net_sockets.h"
 #include "mbedtls/error.h"
 #include "mbedtls/debug.h"
 #include "mbedtls/timing.h"
@@ -170,7 +179,7 @@ int main( void )
     printf( "  . Bind on udp/*/4433 ..." );
     fflush( stdout );
 
-    if( ( ret = mbedtls_net_bind( &listen_fd, NULL, "4433", MBEDTLS_NET_PROTO_UDP ) ) != 0 )
+    if( ( ret = mbedtls_net_bind( &listen_fd, BIND_IP, "4433", MBEDTLS_NET_PROTO_UDP ) ) != 0 )
     {
         printf( " failed\n  ! mbedtls_net_bind returned %d\n\n", ret );
         goto exit;

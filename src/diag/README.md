@@ -8,17 +8,14 @@ The diagnostics module supports common diagnostics features that are listed belo
 ## Common Diagnostics Command List
 
 * [diag](#diag)
-* [diag start](#diag start)
-* [diag channel](#diag channel)
-* [diag channel \<channel\>](#diag channel \<channel\>)
-* [diag power](#diag power)
-* [diag power \<power\>](#diag power \<power\>)
-* [diag send \<packets\> \<length\>](#diag send \<packets\> \<length\>)
-* [diag repeat \<delay\> \<length\>](#diag repeat \<delay\> \<length\>)
-* [diag repeat stop](#diag repeat stop)
-* [diag sleep](#diag sleep)
-* [diag stats](#diag stats)
-* [diag stop](#diag stop)
+* [diag start](#diag-start)
+* [diag channel](#diag-channel)
+* [diag power](#diag-power)
+* [diag send](#diag-send-packets-length)
+* [diag repeat](#diag-repeat-delay-length)
+* [diag radio](#diag-radio)
+* [diag stats](#diag-stats)
+* [diag stop](#diag-stop)
 
 
 ### diag
@@ -108,13 +105,24 @@ repeated packet transmission is stopped
 status 0x00
 ```
 
-### diag sleep
+### diag radio sleep
 
 Enter radio sleep mode.
 
 ```bash
-> diag sleep
-sleeping now...
+> diag radio sleep
+set radio from receive to sleep
+status 0x00
+```
+
+### diag radio receive
+
+Set radio from sleep mode to receive mode.
+
+```bash
+> diag radio receive
+set radio from sleep to receive on channel 11
+status 0x00
 ```
 
 ### diag stats
@@ -141,3 +149,4 @@ first received packet: rssi=-65, lqi=101
 stop diagnostics mode
 status 0x00
 ```
+

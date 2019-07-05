@@ -35,13 +35,20 @@
 #ifndef PLATFORM_CC2538_H_
 #define PLATFORM_CC2538_H_
 
+#include <openthread-core-config.h>
 #include <stdint.h>
-#include <openthread-types.h>
+#include <openthread/config.h>
+#include <openthread/instance.h>
 
 #include "cc2538-reg.h"
 
 // Global OpenThread instance structure
 extern otInstance *sInstance;
+
+/**
+ * Initialize the debug uart
+ */
+void cc2538DebugUartInit(void);
 
 /**
  * This function initializes the alarm service used by OpenThread.
@@ -83,4 +90,18 @@ void cc2538RandomInit(void);
  */
 void cc2538UartProcess(void);
 
-#endif  // PLATFORM_CC2538_H_
+#if OPENTHREAD_CONFIG_CC2538_WITH_CC2592 && OPENTHREAD_CONFIG_CC2592_USE_HGM
+/**
+ * Change the state of the CC2592 HGM pin.
+ *
+ * @param	aState	Whether or not to enable HGM
+ */
+void cc2538RadioSetHgm(bool aState);
+
+/**
+ * Retrieve the state of the CC2592 HGM pin.
+ */
+bool cc2538RadioGetHgm(void);
+#endif // OPENTHREAD_CONFIG_CC2538_WITH_CC2592 && OPENTHREAD_CONFIG_CC2592_USE_HGM
+
+#endif // PLATFORM_CC2538_H_

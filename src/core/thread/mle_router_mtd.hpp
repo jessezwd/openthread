@@ -31,144 +31,128 @@
  *   This file includes definitions for MLE functionality required by the Thread Router and Leader roles.
  */
 
-#ifndef MLE_ROUTER_HPP_
-#define MLE_ROUTER_HPP_
+#ifndef MLE_ROUTER_MTD_HPP_
+#define MLE_ROUTER_MTD_HPP_
 
-#include <string.h>
+#include "openthread-core-config.h"
 
-#include <thread/mle.hpp>
-#include <thread/mle_tlvs.hpp>
-#include <thread/thread_tlvs.hpp>
+#include "utils/wrap_string.h"
 
-namespace Thread {
+#include "thread/child_table.hpp"
+#include "thread/mle.hpp"
+#include "thread/mle_tlvs.hpp"
+#include "thread/router_table.hpp"
+#include "thread/thread_tlvs.hpp"
+
+namespace ot {
 namespace Mle {
 
-class MleRouter: public Mle
+class MleRouter : public Mle
 {
     friend class Mle;
+    friend class ot::Instance;
 
 public:
-    explicit MleRouter(ThreadNetif &aThreadNetif) : Mle(aThreadNetif) { }
+    explicit MleRouter(Instance &aInstance)
+        : Mle(aInstance)
+        , mChildTable(aInstance)
+        , mRouterTable(aInstance)
+    {
+    }
 
     bool IsRouterRoleEnabled(void) const { return false; }
-    void SetRouterRoleEnabled(bool) { }
 
-    bool IsSingleton(void) { return false; }
+    bool IsSingleton(void) const { return false; }
 
-    ThreadError BecomeRouter(ThreadStatusTlv::Status) { return kThreadError_NotCapable; }
-    ThreadError BecomeLeader(void) { return kThreadError_NotCapable; }
+    otError BecomeRouter(ThreadStatusTlv::Status) { return OT_ERROR_NOT_CAPABLE; }
+    otError BecomeLeader(void) { return OT_ERROR_NOT_CAPABLE; }
 
-    uint8_t GetActiveRouterCount(void) const { return 0; }
+    uint8_t GetRouterSelectionJitterTimeout(void) const { return 0; }
 
-    uint32_t GetLeaderAge(void) const { return 0; }
-
-    uint8_t GetLeaderWeight(void) const { return 0; }
-    void SetLeaderWeight(uint8_t) { }
-
-    uint32_t GetLeaderPartitionId(void) const { return 0; }
-    void SetLeaderPartitionId(uint32_t) { }
-
-    ThreadError SetPreferredRouterId(uint8_t) { return kThreadError_NotImplemented; }
-    void SetPreviousPartitionId(uint32_t) { }
-    void SetRouterId(uint8_t) { }
+    uint32_t GetPreviousPartitionId(void) const { return 0; }
+    void     SetPreviousPartitionId(uint32_t) {}
+    void     SetRouterId(uint8_t) {}
 
     uint16_t GetNextHop(uint16_t aDestination) const { return Mle::GetNextHop(aDestination); }
 
     uint8_t GetNetworkIdTimeout(void) const { return 0; }
-    void SetNetworkIdTimeout(uint8_t) { }
 
     uint8_t GetRouteCost(uint16_t) const { return 0; }
     uint8_t GetLinkCost(uint16_t) { return 0; }
+    uint8_t GetCost(uint16_t) { return 0; }
 
-    uint8_t GetRouterIdSequence(void) const { return 0; }
+    otError RemoveNeighbor(Neighbor &) { return BecomeDetached(); }
 
-    uint8_t GetRouterUpgradeThreshold(void) const { return 0; }
-    void SetRouterUpgradeThreshold(uint8_t) { }
+    bool IsMinimalChild(uint16_t) const { return false; }
 
-    uint8_t GetRouterDowngradeThreshold(void) const { return 0; }
-    void SetRouterDowngradeThreshold(uint8_t) { }
-
-    ThreadError ReleaseRouterId(uint8_t) { return kThreadError_NotImplemented; }
-
-    ThreadError RemoveNeighbor(const Mac::Address &) { return BecomeDetached(); }
-    ThreadError RemoveNeighbor(Neighbor &) { return BecomeDetached(); }
-
-    Child *GetChild(uint16_t) { return NULL; }
-    Child *GetChild(const Mac::ExtAddress &) { return NULL; }
-    Child *GetChild(const Mac::Address &) { return NULL; }
-
-    uint8_t GetChildIndex(const Child &) { return 0; }
-
-    Child *GetChildren(uint8_t *aNumChildren) {
-        if (aNumChildren != NULL) {
-            *aNumChildren = 0;
-        }
-
-        return NULL;
-    }
-
-    ThreadError SetMaxAllowedChildren(uint8_t) { return kThreadError_NotImplemented; }
-
-    ThreadError RestoreChildren(void) {return kThreadError_NotImplemented; }
-    ThreadError RemoveStoredChild(uint16_t) {return kThreadError_NotImplemented; }
-    ThreadError StoreChild(uint16_t) {return kThreadError_NotImplemented; }
+    void    RestoreChildren(void) {}
+    otError RemoveStoredChild(uint16_t) { return OT_ERROR_NOT_IMPLEMENTED; }
+    otError StoreChild(const Child &) { return OT_ERROR_NOT_IMPLEMENTED; }
 
     Neighbor *GetNeighbor(uint16_t aAddress) { return Mle::GetNeighbor(aAddress); }
     Neighbor *GetNeighbor(const Mac::ExtAddress &aAddress) { return Mle::GetNeighbor(aAddress); }
     Neighbor *GetNeighbor(const Mac::Address &aAddress) { return Mle::GetNeighbor(aAddress); }
     Neighbor *GetNeighbor(const Ip6::Address &aAddress) { return Mle::GetNeighbor(aAddress); }
-
-    ThreadError GetChildInfoById(uint16_t, otChildInfo &) { return kThreadError_NotImplemented; }
-    ThreadError GetChildInfoByIndex(uint8_t, otChildInfo &) { return kThreadError_NotImplemented; }
-
-    ThreadError GetNextNeighborInfo(otNeighborInfoIterator &, otNeighborInfo &) { return kThreadError_NotImplemented; }
-
-    Router *GetRouters(uint8_t *aNumRouters) {
-        if (aNumRouters != NULL) {
-            *aNumRouters = 0;
-        }
-
+    Neighbor *GetRxOnlyNeighborRouter(const Mac::Address &aAddress)
+    {
+        OT_UNUSED_VARIABLE(aAddress);
         return NULL;
     }
 
-    ThreadError GetRouterInfo(uint16_t, otRouterInfo &) { return kThreadError_NotImplemented; }
+    otError GetNextNeighborInfo(otNeighborInfoIterator &, otNeighborInfo &) { return OT_ERROR_NOT_IMPLEMENTED; }
 
     static int ComparePartitions(bool, const LeaderDataTlv &, bool, const LeaderDataTlv &) { return 0; }
 
-    void ResolveRoutingLoops(uint16_t, uint16_t) { }
+    void ResolveRoutingLoops(uint16_t, uint16_t) {}
 
-    ThreadError CheckReachability(uint16_t aMeshSource, uint16_t aMeshDest, Ip6::Header &aIp6Header) {
+    otError CheckReachability(uint16_t aMeshSource, uint16_t aMeshDest, Ip6::Header &aIp6Header)
+    {
         return Mle::CheckReachability(aMeshSource, aMeshDest, aIp6Header);
     }
 
     static bool IsRouterIdValid(uint8_t aRouterId) { return aRouterId <= kMaxRouterId; }
 
-    void FillConnectivityTlv(ConnectivityTlv &) { }
-    void FillRouteTlv(RouteTlv &) { }
-    const MessageQueue &GetMessageQueue(void) const { return mDelayedResponses; }
+    void FillConnectivityTlv(ConnectivityTlv &) {}
+
+    otError SendChildUpdateRequest(void) { return Mle::SendChildUpdateRequest(); }
+
+#if OPENTHREAD_CONFIG_ENABLE_STEERING_DATA_SET_OOB
+    otError SetSteeringData(const otExtAddress *) { return OT_ERROR_NOT_IMPLEMENTED; }
+#endif // OPENTHREAD_CONFIG_ENABLE_STEERING_DATA_SET_OOB
+
+    otError GetMaxChildTimeout(uint32_t &) { return OT_ERROR_NOT_IMPLEMENTED; }
+
+    bool HasSleepyChildrenSubscribed(const Ip6::Address &) { return false; }
+
+    bool IsSleepyChildSubscribed(const Ip6::Address &, Child &) { return false; }
 
 private:
-    ThreadError HandleDetachStart(void) { return kThreadError_None; }
-    ThreadError HandleChildStart(otMleAttachFilter) { return kThreadError_None; }
-    ThreadError HandleLinkRequest(const Message &, const Ip6::MessageInfo &) { return kThreadError_Drop; }
-    ThreadError HandleLinkAccept(const Message &, const Ip6::MessageInfo &, uint32_t) { return kThreadError_Drop; }
-    ThreadError HandleLinkAccept(const Message &, const Ip6::MessageInfo &, uint32_t, bool) { return kThreadError_Drop; }
-    ThreadError HandleLinkAcceptAndRequest(const Message &, const Ip6::MessageInfo &, uint32_t) { return kThreadError_Drop; }
-    ThreadError HandleAdvertisement(const Message &, const Ip6::MessageInfo &) { return kThreadError_Drop; }
-    ThreadError HandleParentRequest(const Message &, const Ip6::MessageInfo &) { return kThreadError_Drop; }
-    ThreadError HandleChildIdRequest(const Message &, const Ip6::MessageInfo &, uint32_t) { return kThreadError_Drop; }
-    ThreadError HandleChildUpdateRequest(const Message &, const Ip6::MessageInfo &) { return kThreadError_Drop; }
-    ThreadError HandleChildUpdateResponse(const Message &, const Ip6::MessageInfo &, uint32_t) { return kThreadError_Drop; }
-    ThreadError HandleDataRequest(const Message &, const Ip6::MessageInfo &) { return kThreadError_Drop; }
-    ThreadError HandleNetworkDataUpdateRouter(void) { return kThreadError_None; }
-    ThreadError HandleDiscoveryRequest(const Message &, const Ip6::MessageInfo &) { return kThreadError_Drop; }
+    void    HandleDetachStart(void) {}
+    otError HandleChildStart(AttachMode) { return OT_ERROR_NONE; }
+    otError HandleLinkRequest(const Message &, const Ip6::MessageInfo &) { return OT_ERROR_DROP; }
+    otError HandleLinkAccept(const Message &, const Ip6::MessageInfo &, uint32_t) { return OT_ERROR_DROP; }
+    otError HandleLinkAccept(const Message &, const Ip6::MessageInfo &, uint32_t, bool) { return OT_ERROR_DROP; }
+    otError HandleLinkAcceptAndRequest(const Message &, const Ip6::MessageInfo &, uint32_t) { return OT_ERROR_DROP; }
+    otError HandleAdvertisement(const Message &, const Ip6::MessageInfo &) { return OT_ERROR_DROP; }
+    otError HandleParentRequest(const Message &, const Ip6::MessageInfo &) { return OT_ERROR_DROP; }
+    otError HandleChildIdRequest(const Message &, const Ip6::MessageInfo &, uint32_t) { return OT_ERROR_DROP; }
+    otError HandleChildUpdateRequest(const Message &, const Ip6::MessageInfo &, uint32_t) { return OT_ERROR_DROP; }
+    otError HandleChildUpdateResponse(const Message &, const Ip6::MessageInfo &, uint32_t) { return OT_ERROR_DROP; }
+    otError HandleDataRequest(const Message &, const Ip6::MessageInfo &) { return OT_ERROR_DROP; }
+    void    HandleNetworkDataUpdateRouter(void) {}
+    otError HandleDiscoveryRequest(const Message &, const Ip6::MessageInfo &) { return OT_ERROR_DROP; }
+    void    HandlePartitionChange(void) {}
+    void    StopAdvertiseTimer(void) {}
+    otError ProcessRouteTlv(const RouteTlv &) { return OT_ERROR_NONE; }
+#if OPENTHREAD_CONFIG_ENABLE_TIME_SYNC
+    otError HandleTimeSync(const Message &, const Ip6::MessageInfo &) { return OT_ERROR_DROP; }
+#endif
 
-    ThreadError ProcessRouteTlv(const RouteTlv &aRoute) { (void)aRoute; return kThreadError_None; }
-
-    MessageQueue mDelayedResponses;
+    ChildTable  mChildTable;
+    RouterTable mRouterTable;
 };
 
-}  // namespace Mle
-}  // namespace Thread
+} // namespace Mle
+} // namespace ot
 
-#endif  // MLE_ROUTER_HPP_
+#endif // MLE_ROUTER_MTD_HPP_

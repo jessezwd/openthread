@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -30,6 +30,8 @@
 import time
 import unittest
 
+import config
+import mle
 import node
 
 LEADER = 1
@@ -37,9 +39,11 @@ ED = 2
 
 class Cert_6_1_1_RouterAttach(unittest.TestCase):
     def setUp(self):
+        self.simulator = config.create_default_simulator()
+
         self.nodes = {}
         for i in range(1,3):
-            self.nodes[i] = node.Node(i)
+            self.nodes[i] = node.Node(i, (i == ED), simulator=self.simulator)
 
         self.nodes[LEADER].set_panid(0xface)
         self.nodes[LEADER].set_mode('rsdn')
@@ -54,16 +58,64 @@ class Cert_6_1_1_RouterAttach(unittest.TestCase):
     def tearDown(self):
         for node in list(self.nodes.values()):
             node.stop()
-        del self.nodes
+            node.destroy()
+        self.simulator.stop()
 
     def test(self):
         self.nodes[LEADER].start()
-        self.nodes[LEADER].set_state('leader')
+        self.simulator.go(5)
         self.assertEqual(self.nodes[LEADER].get_state(), 'leader')
 
         self.nodes[ED].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ED].get_state(), 'child')
+
+        leader_messages = self.simulator.get_messages_sent_by(LEADER)
+        ed_messages = self.simulator.get_messages_sent_by(ED)
+
+        # 1 - leader
+        msg = leader_messages.next_mle_message(mle.CommandType.ADVERTISEMENT)
+
+        # 2 - ed
+        msg = ed_messages.next_mle_message(mle.CommandType.PARENT_REQUEST)
+        self.assertEqual(0x02, msg.mle.aux_sec_hdr.key_id_mode)
+        msg.assertSentWithHopLimit(255)
+        msg.assertSentToDestinationAddress("ff02::2")
+        msg.assertMleMessageContainsTlv(mle.Mode)
+        msg.assertMleMessageContainsTlv(mle.Challenge)
+        msg.assertMleMessageContainsTlv(mle.ScanMask)
+        msg.assertMleMessageContainsTlv(mle.Version)
+
+        scan_mask_tlv = msg.get_mle_message_tlv(mle.ScanMask)
+        self.assertEqual(1, scan_mask_tlv.router)
+        self.assertEqual(0, scan_mask_tlv.end_device)
+
+        # 3 - leader
+        msg = leader_messages.next_mle_message(mle.CommandType.PARENT_RESPONSE)
+        msg.assertSentToNode(self.nodes[ED])
+
+        # 4 - ed
+        msg = ed_messages.next_mle_message(mle.CommandType.CHILD_ID_REQUEST)
+        self.assertEqual(0x02, msg.mle.aux_sec_hdr.key_id_mode)
+        msg.assertSentToNode(self.nodes[LEADER])
+        msg.assertMleMessageContainsTlv(mle.AddressRegistration)
+        msg.assertMleMessageContainsTlv(mle.LinkLayerFrameCounter)
+        msg.assertMleMessageContainsTlv(mle.Mode)
+        msg.assertMleMessageContainsTlv(mle.Response)
+        msg.assertMleMessageContainsTlv(mle.Timeout)
+        msg.assertMleMessageContainsTlv(mle.TlvRequest)
+        msg.assertMleMessageContainsTlv(mle.Version)
+        msg.assertMleMessageContainsOptionalTlv(mle.MleFrameCounter)
+
+        # 5 - leader
+        msg = leader_messages.next_mle_message(mle.CommandType.CHILD_ID_RESPONSE)
+        msg.assertSentToNode(self.nodes[ED])
+
+        # 6 - leader
+        ed_addrs = self.nodes[ED].get_addrs()
+        for addr in ed_addrs:
+            if addr[0:4] != 'fe80':
+                self.assertTrue(self.nodes[LEADER].ping(addr))
 
 if __name__ == '__main__':
     unittest.main()

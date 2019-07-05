@@ -33,22 +33,25 @@
 #include <string.h>
 #include <sys/time.h>
 
-#include <openthread-config.h>
-#include <openthread.h>
+#include <openthread/config.h>
+#include <openthread/platform/alarm-milli.h>
+#include <openthread/platform/radio.h>
 
-#include <platform/alarm.h>
+#if OPENTHREAD_ENABLE_DIAG
 
 /**
- * diagnostics mode flag.
+ * Diagnostics mode variables.
  *
  */
 static bool sDiagMode = false;
 
-void otPlatDiagProcess(int argc, char *argv[], char *aOutput, size_t aOutputMaxLen)
+void otPlatDiagProcess(otInstance *aInstance, int argc, char *argv[], char *aOutput, size_t aOutputMaxLen)
 {
-    // no more diagnostics features for Posix platform
+    OT_UNUSED_VARIABLE(aInstance);
+    OT_UNUSED_VARIABLE(argc);
+
+    // Add more platform specific diagnostics features here.
     snprintf(aOutput, aOutputMaxLen, "diag feature '%s' is not supported\r\n", argv[0]);
-    (void)argc;
 }
 
 void otPlatDiagModeSet(bool aMode)
@@ -60,3 +63,27 @@ bool otPlatDiagModeGet()
 {
     return sDiagMode;
 }
+
+void otPlatDiagChannelSet(uint8_t aChannel)
+{
+    OT_UNUSED_VARIABLE(aChannel);
+}
+
+void otPlatDiagTxPowerSet(int8_t aTxPower)
+{
+    OT_UNUSED_VARIABLE(aTxPower);
+}
+
+void otPlatDiagRadioReceived(otInstance *aInstance, otRadioFrame *aFrame, otError aError)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+    OT_UNUSED_VARIABLE(aFrame);
+    OT_UNUSED_VARIABLE(aError);
+}
+
+void otPlatDiagAlarmCallback(otInstance *aInstance)
+{
+    OT_UNUSED_VARIABLE(aInstance);
+}
+
+#endif // OPENTHREAD_ENABLE_DIAG

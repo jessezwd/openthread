@@ -31,49 +31,53 @@
  *   This file implements the tasklet scheduler.
  */
 
-#include <openthread.h>
-#include <common/code_utils.hpp>
-#include <common/debug.hpp>
-#include <common/tasklet.hpp>
-#include <net/ip6.hpp>
+#include "tasklet.hpp"
 
-namespace Thread {
+#include "common/code_utils.hpp"
+#include "common/debug.hpp"
+#include "common/instance.hpp"
+#include "common/locator-getters.hpp"
+#include "net/ip6.hpp"
 
-Tasklet::Tasklet(TaskletScheduler &aScheduler, Handler aHandler, void *aContext):
-    mScheduler(aScheduler),
-    mHandler(aHandler),
-    mContext(aContext),
-    mNext(NULL)
+namespace ot {
+
+Tasklet::Tasklet(Instance &aInstance, Handler aHandler, void *aOwner)
+    : InstanceLocator(aInstance)
+    , OwnerLocator(aOwner)
+    , mHandler(aHandler)
+    , mNext(NULL)
 {
 }
 
-ThreadError Tasklet::Post(void)
+otError Tasklet::Post(void)
 {
-    return mScheduler.Post(*this);
+    return Get<TaskletScheduler>().Post(*this);
 }
 
-TaskletScheduler::TaskletScheduler(void):
-    mHead(NULL),
-    mTail(NULL)
+TaskletScheduler::TaskletScheduler(void)
+    : mHead(NULL)
+    , mTail(NULL)
 {
 }
 
-ThreadError TaskletScheduler::Post(Tasklet &aTasklet)
+otError TaskletScheduler::Post(Tasklet &aTasklet)
 {
-    ThreadError error = kThreadError_None;
+    otError error = OT_ERROR_NONE;
 
-    VerifyOrExit(mTail != &aTasklet && aTasklet.mNext == NULL, error = kThreadError_Already);
+    VerifyOrExit(mTail != &aTasklet && aTasklet.mNext == NULL, error = OT_ERROR_ALREADY);
+
+    VerifyOrExit(&aTasklet.Get<TaskletScheduler>() == this);
 
     if (mTail == NULL)
     {
         mHead = &aTasklet;
         mTail = &aTasklet;
-        otSignalTaskletPending(aTasklet.mScheduler.GetIp6()->GetInstance());
+        otTaskletsSignalPending(&aTasklet.GetInstance());
     }
     else
     {
         mTail->mNext = &aTasklet;
-        mTail = &aTasklet;
+        mTail        = &aTasklet;
     }
 
 exit:
@@ -99,11 +103,6 @@ Tasklet *TaskletScheduler::PopTasklet(void)
     return task;
 }
 
-bool TaskletScheduler::AreTaskletsPending(void)
-{
-    return mHead != NULL;
-}
-
 void TaskletScheduler::ProcessQueuedTasklets(void)
 {
     Tasklet *tail = mTail;
@@ -118,7 +117,7 @@ void TaskletScheduler::ProcessQueuedTasklets(void)
         {
             if (mHead != NULL)
             {
-                otSignalTaskletPending(cur->mScheduler.GetIp6()->GetInstance());
+                otTaskletsSignalPending(&mHead->GetInstance());
             }
 
             break;
@@ -126,9 +125,4 @@ void TaskletScheduler::ProcessQueuedTasklets(void)
     }
 }
 
-Ip6::Ip6 *TaskletScheduler::GetIp6()
-{
-    return Ip6::Ip6FromTaskletScheduler(this);
-}
-
-}  // namespace Thread
+} // namespace ot

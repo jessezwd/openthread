@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -30,17 +30,20 @@
 import time
 import unittest
 
+import config
 import node
 
 LEADER = 1
 ROUTER = 2
-SED1 = 6
+SED1 = 7
 
 class Cert_5_1_07_MaxChildCount(unittest.TestCase):
     def setUp(self):
+        self.simulator = config.create_default_simulator()
+
         self.nodes = {}
         for i in range(1, 13):
-            self.nodes[i] = node.Node(i)
+            self.nodes[i] = node.Node(i, (i >= 3), simulator=self.simulator)
 
         self.nodes[LEADER].set_panid(0xface)
         self.nodes[LEADER].set_mode('rsdn')
@@ -63,25 +66,26 @@ class Cert_5_1_07_MaxChildCount(unittest.TestCase):
             self.nodes[i].add_whitelist(self.nodes[ROUTER].get_addr64())
             self.nodes[ROUTER].add_whitelist(self.nodes[i].get_addr64())
             self.nodes[i].enable_whitelist()
-            self.nodes[i].set_timeout(3)
+            self.nodes[i].set_timeout(config.DEFAULT_CHILD_TIMEOUT)
 
     def tearDown(self):
         for node in list(self.nodes.values()):
             node.stop()
-        del self.nodes
+            node.destroy()
+        self.simulator.stop()
 
     def test(self):
         self.nodes[LEADER].start()
-        self.nodes[LEADER].set_state('leader')
+        self.simulator.go(5)
         self.assertEqual(self.nodes[LEADER].get_state(), 'leader')
 
         self.nodes[ROUTER].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ROUTER].get_state(), 'router')
 
         for i in range(3, 13):
             self.nodes[i].start()
-            time.sleep(7)
+            self.simulator.go(7)
             self.assertEqual(self.nodes[i].get_state(), 'child')
 
         ipaddrs = self.nodes[SED1].get_addrs()
@@ -96,6 +100,6 @@ class Cert_5_1_07_MaxChildCount(unittest.TestCase):
                 if addr[0:4] != 'fe80' and 'ff:fe00' not in addr:
                     self.assertTrue(self.nodes[LEADER].ping(addr, size=106))
                     break
-        
+
 if __name__ == '__main__':
     unittest.main()

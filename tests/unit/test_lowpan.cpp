@@ -26,17 +26,19 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "test_util.hpp"
 #include "test_lowpan.hpp"
 
-using namespace Thread;
-using Thread::Encoding::BigEndian::HostSwap16;
+#include "test_platform.h"
+#include "test_util.hpp"
 
-namespace Thread {
+using namespace ot;
+using ot::Encoding::BigEndian::HostSwap16;
 
-Ip6::Ip6 sIp6;
-ThreadNetif sMockThreadNetif(sIp6);
-Lowpan::Lowpan sMockLowpan(sMockThreadNetif);
+namespace ot {
+
+ot::Instance *  sInstance;
+Ip6::Ip6 *      sIp6;
+Lowpan::Lowpan *sLowpan;
 
 void TestIphcVector::GetCompressedStream(uint8_t *aIphc, uint16_t &aIphcLength)
 {
@@ -82,8 +84,7 @@ void TestIphcVector::GetUncompressedStream(Message &aMessage)
 
     if (mExtHeader.mLength)
     {
-        SuccessOrQuit(aMessage.Append(mExtHeader.mData, mExtHeader.mLength),
-                      "6lo: Message::Append failed");
+        SuccessOrQuit(aMessage.Append(mExtHeader.mData, mExtHeader.mLength), "6lo: Message::Append failed");
     }
 
     if (mIpTunneledHeader.GetPayloadLength())
@@ -107,28 +108,31 @@ void TestIphcVector::GetUncompressedStream(Message &aMessage)
  */
 static void Init()
 {
-    uint8_t meshLocalPrefix[] = {0xfd, 0x00, 0xca, 0xfe, 0xfa, 0xce, 0x12, 0x34};
-    sMockThreadNetif.GetMle().SetMeshLocalPrefix(meshLocalPrefix);
+    otMeshLocalPrefix meshLocalPrefix = {{0xfd, 0x00, 0xca, 0xfe, 0xfa, 0xce, 0x12, 0x34}};
+    sInstance->Get<Mle::MleRouter>().SetMeshLocalPrefix(meshLocalPrefix);
 
     // Emulate global prefixes with contextes.
-    uint8_t mockNetworkData[] =
-    {
+    uint8_t mockNetworkData[] = {
+        0x0c, // MLE Network Data Type
+        0x20, // MLE Network Data Length
+
         // Prefix 2001:2:0:1::/64
-        0x03, 0x0e, // Prefix TLV
-        0x00, 0x40,
-        0x20, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01,
-        0x07, 0x02, // 6LoWPAN Context ID TLV
-        0x11, 0x40, // Context ID = 1, C = TRUE
+        0x03, 0x0e,                                                             // Prefix TLV
+        0x00, 0x40, 0x20, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x07, 0x02, // 6LoWPAN Context ID TLV
+        0x11, 0x40,                                                             // Context ID = 1, C = TRUE
 
         // Prefix 2001:2:0:2::/64
-        0x03, 0x0e, // Prefix TLV
-        0x00, 0x40,
-        0x20, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
-        0x07, 0x02, // 6LoWPAN Context ID TLV
-        0x02, 0x40  // Context ID = 2, C = FALSE
+        0x03, 0x0e,                                                             // Prefix TLV
+        0x00, 0x40, 0x20, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x07, 0x02, // 6LoWPAN Context ID TLV
+        0x02, 0x40                                                              // Context ID = 2, C = FALSE
     };
 
-    sMockThreadNetif.GetNetworkDataLeader().SetNetworkData(0, 0, true, mockNetworkData, sizeof(mockNetworkData));
+    Message *message = sInstance->Get<MessagePool>().New(Message::kTypeIp6, 0);
+    VerifyOrQuit(message != NULL, "6lo: Ip6::NewMessage failed");
+
+    SuccessOrQuit(message->Append(mockNetworkData, sizeof(mockNetworkData)), "6lo: Message::Append failed");
+
+    sInstance->Get<NetworkData::Leader>().SetNetworkData(0, 0, true, *message, 0);
 }
 
 /**
@@ -145,9 +149,9 @@ static void Init()
 static void Test(TestIphcVector &aVector, bool aCompress, bool aDecompress)
 {
     Message *message = NULL;
-    uint8_t result[512];
-    uint8_t iphc[512];
-    uint8_t ip6[512];
+    uint8_t  result[512];
+    uint8_t  iphc[512];
+    uint8_t  ip6[512];
     uint16_t iphcLength;
     uint16_t ip6Length;
 
@@ -173,20 +177,22 @@ static void Test(TestIphcVector &aVector, bool aCompress, bool aDecompress)
 
     if (aCompress)
     {
-        VerifyOrQuit((message = sIp6.mMessagePool.New(Message::kTypeIp6, 0)) != NULL,
+        Lowpan::BufferWriter buffer(result, 127);
+
+        VerifyOrQuit((message = sInstance->Get<MessagePool>().New(Message::kTypeIp6, 0)) != NULL,
                      "6lo: Ip6::NewMessage failed");
 
         aVector.GetUncompressedStream(*message);
 
-        int compressBytes = sMockLowpan.Compress(*message, aVector.mMacSource, aVector.mMacDestination,
-                                                 result);
+        VerifyOrQuit(sLowpan->Compress(*message, aVector.mMacSource, aVector.mMacDestination, buffer) == aVector.mError,
+                     "6lo: Lowpan:Compress failed");
 
-        if (aVector.mError == kThreadError_None)
+        if (aVector.mError == OT_ERROR_NONE)
         {
+            uint8_t compressBytes = static_cast<uint8_t>(buffer.GetWritePointer() - result);
+
             // Append payload to the LOWPAN_IPHC.
-            message->Read(message->GetOffset(),
-                          message->GetLength() - message->GetOffset(),
-                          result + compressBytes);
+            message->Read(message->GetOffset(), message->GetLength() - message->GetOffset(), result + compressBytes);
 
             printf("Resulted LOWPAN_IPHC compressed frame: \n");
             otTestPrintHex(result, compressBytes + message->GetLength() - message->GetOffset());
@@ -194,12 +200,7 @@ static void Test(TestIphcVector &aVector, bool aCompress, bool aDecompress)
 
             VerifyOrQuit(compressBytes == aVector.mIphcHeader.mLength, "6lo: Lowpan::Compress failed");
             VerifyOrQuit(message->GetOffset() == aVector.mPayloadOffset, "6lo: Lowpan::Compress failed");
-            VerifyOrQuit(memcmp(iphc, result, iphcLength) == 0,
-                         "6lo: Lowpan::Compress failed");
-        }
-        else
-        {
-            VerifyOrQuit(compressBytes < 0 , "6lo: Lowpan::Compress failed");
+            VerifyOrQuit(memcmp(iphc, result, iphcLength) == 0, "6lo: Lowpan::Compress failed");
         }
 
         message->Free();
@@ -208,15 +209,15 @@ static void Test(TestIphcVector &aVector, bool aCompress, bool aDecompress)
 
     if (aDecompress)
     {
-        VerifyOrQuit((message = sIp6.mMessagePool.New(Message::kTypeIp6, 0)) != NULL,
+        VerifyOrQuit((message = sInstance->Get<MessagePool>().New(Message::kTypeIp6, 0)) != NULL,
                      "6lo: Ip6::NewMessage failed");
 
-        int decompressedBytes = sMockLowpan.Decompress(*message, aVector.mMacSource, aVector.mMacDestination,
-                                                       iphc, iphcLength, 0);
+        int decompressedBytes =
+            sLowpan->Decompress(*message, aVector.mMacSource, aVector.mMacDestination, iphc, iphcLength, 0);
 
         message->Read(0, message->GetLength(), result);
 
-        if (aVector.mError == kThreadError_None)
+        if (aVector.mError == OT_ERROR_NONE)
         {
             // Append payload to the IPv6 Packet.
             memcpy(result + message->GetLength(), iphc + decompressedBytes,
@@ -226,14 +227,14 @@ static void Test(TestIphcVector &aVector, bool aCompress, bool aDecompress)
             otTestPrintHex(result, message->GetLength() + iphcLength - decompressedBytes);
             printf("\n");
 
-            VerifyOrQuit(decompressedBytes == aVector.mIphcHeader.mLength , "6lo: Lowpan::Decompress failed");
+            VerifyOrQuit(decompressedBytes == aVector.mIphcHeader.mLength, "6lo: Lowpan::Decompress failed");
             VerifyOrQuit(message->GetOffset() == aVector.mPayloadOffset, "6lo: Lowpan::Decompress failed");
             VerifyOrQuit(message->GetOffset() == message->GetLength(), "6lo: Lowpan::Decompress failed");
             VerifyOrQuit(memcmp(ip6, result, ip6Length) == 0, "6lo: Lowpan::Decompress failed");
         }
         else
         {
-            VerifyOrQuit(decompressedBytes < 0 , "6lo: Lowpan::Decompress failed");
+            VerifyOrQuit(decompressedBytes < 0, "6lo: Lowpan::Decompress failed");
         }
 
         message->Free();
@@ -246,18 +247,18 @@ static void Test(TestIphcVector &aVector, bool aCompress, bool aDecompress)
 /***************************************************************************************************
  * @section Test constants.
  **************************************************************************************************/
-static const uint8_t sTestMacSourceDefaultLong[] = {0x00, 0x00, 0x5e, 0xef, 0x10, 0x22, 0x11, 0x00};
+static const uint8_t sTestMacSourceDefaultLong[]      = {0x00, 0x00, 0x5e, 0xef, 0x10, 0x22, 0x11, 0x00};
 static const uint8_t sTestMacDestinationDefaultLong[] = {0x00, 0x00, 0x5e, 0xef, 0x10, 0xaa, 0xbb, 0xcc};
 
-static uint16_t sTestMacSourceDefaultShort = 0x0000;
+static uint16_t sTestMacSourceDefaultShort      = 0x0000;
 static uint16_t sTestMacDestinationDefaultShort = 0xc003;
-static uint16_t sTestMacDestinationBroadcast = 0xffff;
+static uint16_t sTestMacDestinationBroadcast    = 0xffff;
 
 static const uint8_t sTestPayloadDefault[] = {0x80, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
 
 /***************************************************************************************************
-* @section Test cases.
-**************************************************************************************************/
+ * @section Test cases.
+ **************************************************************************************************/
 
 static void TestFullyCompressableLongAddresses(void)
 {
@@ -268,8 +269,7 @@ static void TestFullyCompressableLongAddresses(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "fe80::200:5eef:10aa:bbcc");
 
     // Set LOWPAN_IPHC header.
@@ -279,7 +279,7 @@ static void TestFullyCompressableLongAddresses(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -294,8 +294,7 @@ static void TestFullyCompressableShortAddresses(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultShort);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::ff:fe00:0000",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::ff:fe00:0000",
                            "fe80::ff:fe00:c003");
 
     // Set LOWPAN_IPHC header.
@@ -305,7 +304,7 @@ static void TestFullyCompressableShortAddresses(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -320,8 +319,7 @@ static void TestFullyCompressableShortLongAddresses(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::ff:fe00:0000",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::ff:fe00:0000",
                            "fe80::200:5eef:10aa:bbcc");
 
     // Set LOWPAN_IPHC header.
@@ -331,7 +329,7 @@ static void TestFullyCompressableShortLongAddresses(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -346,8 +344,7 @@ static void TestFullyCompressableLongShortAddresses(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultShort);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "fe80::ff:fe00:c003");
 
     // Set LOWPAN_IPHC header.
@@ -357,7 +354,7 @@ static void TestFullyCompressableLongShortAddresses(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -372,9 +369,7 @@ static void TestSourceUnspecifiedAddress(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultShort);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "::",
-                           "fe80::ff:fe00:c003");
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "::", "fe80::ff:fe00:c003");
 
     // Set LOWPAN_IPHC header.
     uint8_t iphc[] = {0x7a, 0x43, 0x3a};
@@ -383,7 +378,7 @@ static void TestSourceUnspecifiedAddress(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -399,22 +394,18 @@ static void TestSource128bitDestination128bitAddresses(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "2001:2:0:3:aaaa:bbbb:cccc:dddd",
-                           "2001:2:0:4::");
+                           "2001:2:0:3:aaaa:bbbb:cccc:dddd", "2001:2:0:4::");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0x00, 0x3a, 0x20, 0x01, 0x00, 0x02, 0x00,
-                      0x00, 0x00, 0x03, 0xaa, 0xaa, 0xbb, 0xbb, 0xcc,
-                      0xcc, 0xdd, 0xdd, 0x20, 0x01, 0x00, 0x02, 0x00,
-                      0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
-                      0x00, 0x00, 0x00
-                     };
+    uint8_t iphc[] = {0x7a, 0x00, 0x3a, 0x20, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x03, 0xaa,
+                      0xaa, 0xbb, 0xbb, 0xcc, 0xcc, 0xdd, 0xdd, 0x20, 0x01, 0x00, 0x02, 0x00,
+                      0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -429,21 +420,18 @@ static void TestSource64bitDestination64bitLongAddresses(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1101",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1101",
                            "fe80::200:5eef:10aa:bbcd");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0x11, 0x3a, 0x02, 0x00, 0x5e, 0xef, 0x10,
-                      0x22, 0x11, 0x01, 0x02, 0x00, 0x5e, 0xef, 0x10,
-                      0xaa, 0xbb, 0xcd
-                     };
+    uint8_t iphc[] = {0x7a, 0x11, 0x3a, 0x02, 0x00, 0x5e, 0xef, 0x10, 0x22, 0x11,
+                      0x01, 0x02, 0x00, 0x5e, 0xef, 0x10, 0xaa, 0xbb, 0xcd};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -458,21 +446,18 @@ static void TestSource64bitDestination64bitShortAddresses(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultShort);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1101",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1101",
                            "fe80::200:5eef:10aa:bbcd");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0x11, 0x3a, 0x02, 0x00, 0x5e, 0xef, 0x10,
-                      0x22, 0x11, 0x01, 0x02, 0x00, 0x5e, 0xef, 0x10,
-                      0xaa, 0xbb, 0xcd
-                     };
+    uint8_t iphc[] = {0x7a, 0x11, 0x3a, 0x02, 0x00, 0x5e, 0xef, 0x10, 0x22, 0x11,
+                      0x01, 0x02, 0x00, 0x5e, 0xef, 0x10, 0xaa, 0xbb, 0xcd};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -487,8 +472,7 @@ static void TestSource16bitDestination16bitAddresses(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultShort);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::ff:fe00:0001",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::ff:fe00:0001",
                            "fe80::ff:fe00:c004");
 
     // Set LOWPAN_IPHC header.
@@ -498,7 +482,7 @@ static void TestSource16bitDestination16bitAddresses(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -513,8 +497,7 @@ static void TestSourceCompressedDestination16bitAddresses(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "fe80::ff:fe00:beaf");
 
     // Set LOWPAN_IPHC header.
@@ -524,7 +507,7 @@ static void TestSourceCompressedDestination16bitAddresses(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -539,26 +522,22 @@ static void TestSourceCompressedDestination128bitAddresses(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "2001:2:0:4::");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0x30, 0x3a, 0x20, 0x01, 0x00, 0x02, 0x00,
-                      0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00,
-                      0x00, 0x00, 0x00
-                     };
+    uint8_t iphc[] = {0x7a, 0x30, 0x3a, 0x20, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00,
+                      0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
 }
-
 
 static void TestMulticast128bitAddress(void)
 {
@@ -569,21 +548,18 @@ static void TestMulticast128bitAddress(void)
     testVector.SetMacDestination(sTestMacDestinationBroadcast);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "ff05::100:0030:0001");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0x38, 0x3a, 0xff, 0x05, 0x00, 0x00, 0x00,
-                      0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00,
-                      0x30, 0x00, 0x01
-                     };
+    uint8_t iphc[] = {0x7a, 0x38, 0x3a, 0xff, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00,
+                      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x30, 0x00, 0x01};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -598,20 +574,17 @@ static void TestMulticast48bitAddress(void)
     testVector.SetMacDestination(sTestMacDestinationBroadcast);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "ff05::1:0030:0001");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0x39, 0x3a, 0x05, 0x01, 0x00, 0x30, 0x00,
-                      0x01
-                     };
+    uint8_t iphc[] = {0x7a, 0x39, 0x3a, 0x05, 0x01, 0x00, 0x30, 0x00, 0x01};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -626,20 +599,17 @@ static void TestMulticast32bitAddress(void)
     testVector.SetMacDestination(sTestMacDestinationBroadcast);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "ff03::fc");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0x1a, 0x3a, 0x02, 0x00, 0x5e, 0xef, 0x10,
-                      0x22, 0x11, 0x00, 0x03, 0x00, 0x00, 0xfc
-                     };
+    uint8_t iphc[] = {0x7a, 0x1a, 0x3a, 0x02, 0x00, 0x5e, 0xef, 0x10, 0x22, 0x11, 0x00, 0x03, 0x00, 0x00, 0xfc};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -654,8 +624,7 @@ static void TestMulticast8bitAddress(void)
     testVector.SetMacDestination(sTestMacDestinationBroadcast);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "ff02::2");
 
     // Set LOWPAN_IPHC header.
@@ -665,7 +634,7 @@ static void TestMulticast8bitAddress(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -681,20 +650,17 @@ static void TestStatefulSource64bitDestination64bitContext0(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fd00:cafe:face:1234:abcd:ef01:2345:6789",
-                           "fd00:cafe:face:1234:c31d:a702:0d41:beef");
+                           "fd00:cafe:face:1234:abcd:ef01:2345:6789", "fd00:cafe:face:1234:c31d:a702:0d41:beef");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0x55, 0x3a, 0xab, 0xcd, 0xef, 0x01, 0x23,
-                      0x45, 0x67, 0x89, 0xc3, 0x1d, 0xa7, 0x02, 0x0d,
-                      0x41, 0xbe, 0xef
-                     };
+    uint8_t iphc[] = {0x7a, 0x55, 0x3a, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
+                      0x89, 0xc3, 0x1d, 0xa7, 0x02, 0x0d, 0x41, 0xbe, 0xef};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -710,20 +676,17 @@ static void TestStatefulSource64bitDestination64bitContext0IfContextInLine(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fd00:cafe:face:1234:abcd:ef01:2345:6789",
-                           "fd00:cafe:face:1234:c31d:a702:0d41:beef");
+                           "fd00:cafe:face:1234:abcd:ef01:2345:6789", "fd00:cafe:face:1234:c31d:a702:0d41:beef");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0xd5, 0x00, 0x3a, 0xab, 0xcd, 0xef, 0x01, 0x23,
-                      0x45, 0x67, 0x89, 0xc3, 0x1d, 0xa7, 0x02, 0x0d,
-                      0x41, 0xbe, 0xef
-                     };
+    uint8_t iphc[] = {0x7a, 0xd5, 0x00, 0x3a, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
+                      0x67, 0x89, 0xc3, 0x1d, 0xa7, 0x02, 0x0d, 0x41, 0xbe, 0xef};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform decompression test only.
     Test(testVector, false, true);
@@ -739,8 +702,7 @@ static void TestStatefulSource16bitDestination16bitContext0(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fd00:cafe:face:1234::ff:fe00:fffc",
-                           "fd00:cafe:face:1234::ff:fe00:fffe");
+                           "fd00:cafe:face:1234::ff:fe00:fffc", "fd00:cafe:face:1234::ff:fe00:fffe");
 
     // Set LOWPAN_IPHC header.
     uint8_t iphc[] = {0x7a, 0x66, 0x3a, 0xff, 0xfc, 0xff, 0xfe};
@@ -749,7 +711,7 @@ static void TestStatefulSource16bitDestination16bitContext0(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -765,8 +727,7 @@ static void TestStatefulCompressableLongAddressesContext0(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fd00:cafe:face:1234:0200:5eef:1022:1100",
-                           "fd00:cafe:face:1234:0200:5eef:10aa:bbcc");
+                           "fd00:cafe:face:1234:0200:5eef:1022:1100", "fd00:cafe:face:1234:0200:5eef:10aa:bbcc");
 
     // Set LOWPAN_IPHC header.
     uint8_t iphc[] = {0x7a, 0x77, 0x3a};
@@ -775,7 +736,7 @@ static void TestStatefulCompressableLongAddressesContext0(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -791,8 +752,7 @@ static void TestStatefulCompressableShortAddressesContext0(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "fd00:cafe:face:1234::ff:fe00:c003");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "fd00:cafe:face:1234::ff:fe00:c003");
 
     // Set LOWPAN_IPHC header.
     uint8_t iphc[] = {0x7a, 0x77, 0x3a};
@@ -801,7 +761,7 @@ static void TestStatefulCompressableShortAddressesContext0(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -817,8 +777,7 @@ static void TestStatefulCompressableLongShortAddressesContext0(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fd00:cafe:face:1234:0200:5eef:1022:1100",
-                           "fd00:cafe:face:1234::ff:fe00:c003");
+                           "fd00:cafe:face:1234:0200:5eef:1022:1100", "fd00:cafe:face:1234::ff:fe00:c003");
 
     // Set LOWPAN_IPHC header.
     uint8_t iphc[] = {0x7a, 0x77, 0x3a};
@@ -827,7 +786,7 @@ static void TestStatefulCompressableLongShortAddressesContext0(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -843,21 +802,17 @@ static void TestStatefulSource64bitDestination128bitContext1(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "2001:2:0:1:abcd:ef01:2345:6789",
-                           "2001:2:0:3:c31d:a702:0d41:beef");
+                           "2001:2:0:1:abcd:ef01:2345:6789", "2001:2:0:3:c31d:a702:0d41:beef");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0xd0, 0x10, 0x3a, 0xab, 0xcd, 0xef, 0x01, 0x23,
-                      0x45, 0x67, 0x89, 0x20, 0x01, 0x00, 0x02, 0x00, 0x00,
-                      0x00, 0x03, 0xc3, 0x1d, 0xa7, 0x02, 0x0d, 0x41, 0xbe,
-                      0xef
-                     };
+    uint8_t iphc[] = {0x7a, 0xd0, 0x10, 0x3a, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0x20, 0x01,
+                      0x00, 0x02, 0x00, 0x00, 0x00, 0x03, 0xc3, 0x1d, 0xa7, 0x02, 0x0d, 0x41, 0xbe, 0xef};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -873,20 +828,17 @@ static void TestStatefulSource64bitDestination64bitContext1(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "2001:2:0:1:abcd:ef01:2345:6789",
-                           "2001:2:0:1:c31d:a702:0d41:beef");
+                           "2001:2:0:1:abcd:ef01:2345:6789", "2001:2:0:1:c31d:a702:0d41:beef");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0xd5, 0x11, 0x3a, 0xab, 0xcd, 0xef, 0x01, 0x23,
-                      0x45, 0x67, 0x89, 0xc3, 0x1d, 0xa7, 0x02, 0x0d, 0x41,
-                      0xbe, 0xef
-                     };
+    uint8_t iphc[] = {0x7a, 0xd5, 0x11, 0x3a, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
+                      0x67, 0x89, 0xc3, 0x1d, 0xa7, 0x02, 0x0d, 0x41, 0xbe, 0xef};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -902,22 +854,18 @@ static void TestStatefulSourceDestinationInlineContext2CIDFalse(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "2001:2:0:2:abcd:ef01:2345:6789",
-                           "2001:2:0:2:c31d:a702:0d41:beef");
+                           "2001:2:0:2:abcd:ef01:2345:6789", "2001:2:0:2:c31d:a702:0d41:beef");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0x00, 0x3a, 0x20, 0x01, 0x00, 0x02, 0x00,
-                      0x00, 0x00, 0x02, 0xab, 0xcd, 0xef, 0x01, 0x23,
-                      0x45, 0x67, 0x89, 0x20, 0x01, 0x00, 0x02, 0x00,
-                      0x00, 0x00, 0x02, 0xc3, 0x1d, 0xa7, 0x02, 0x0d,
-                      0x41, 0xbe, 0xef
-                     };
+    uint8_t iphc[] = {0x7a, 0x00, 0x3a, 0x20, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0xab,
+                      0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0x20, 0x01, 0x00, 0x02, 0x00,
+                      0x00, 0x00, 0x02, 0xc3, 0x1d, 0xa7, 0x02, 0x0d, 0x41, 0xbe, 0xef};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression test only.
     Test(testVector, true, false);
@@ -933,19 +881,16 @@ static void TestStatefulMulticastDestination48bitContext0(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fd00:cafe:face:1234:0200:5eef:1022:1100",
-                           "ff33:0040:fd00:cafe:face:1234:0000:0001");
+                           "fd00:cafe:face:1234:0200:5eef:1022:1100", "ff33:0040:fd00:cafe:face:1234:0000:0001");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7a, 0x7c, 0x3a, 0x33, 0x00, 0x00, 0x00, 0x00,
-                      0x01
-                     };
+    uint8_t iphc[] = {0x7a, 0x7c, 0x3a, 0x33, 0x00, 0x00, 0x00, 0x00, 0x01};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform decompression tests.
     Test(testVector, true, true);
@@ -960,8 +905,7 @@ static void TestTrafficClassFlowLabel3Bytes(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x6011ac59, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x6011ac59, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "fe80::200:5eef:10aa:bbcc");
 
     // Set LOWPAN_IPHC header.
@@ -971,7 +915,7 @@ static void TestTrafficClassFlowLabel3Bytes(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -986,8 +930,7 @@ static void TestTrafficClassFlowLabel1Byte(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60d00000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60d00000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "fe80::200:5eef:10aa:bbcc");
 
     // Set LOWPAN_IPHC header.
@@ -997,7 +940,7 @@ static void TestTrafficClassFlowLabel1Byte(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1012,8 +955,7 @@ static void TestTrafficClassFlowLabel1ByteEcnOnly(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60100000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60100000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "fe80::200:5eef:10aa:bbcc");
 
     // Set LOWPAN_IPHC header.
@@ -1023,7 +965,7 @@ static void TestTrafficClassFlowLabel1ByteEcnOnly(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1038,8 +980,7 @@ static void TestTrafficClassFlowLabelInline(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x6ea12345, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x6ea12345, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 64, "fe80::200:5eef:1022:1100",
                            "fe80::200:5eef:10aa:bbcc");
 
     // Set LOWPAN_IPHC header.
@@ -1049,7 +990,7 @@ static void TestTrafficClassFlowLabelInline(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1064,8 +1005,7 @@ static void TestHopLimit1(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultShort);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 1,
-                           "fe80::ff:fe00:0000",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 1, "fe80::ff:fe00:0000",
                            "fe80::ff:fe00:c003");
 
     // Set LOWPAN_IPHC header.
@@ -1075,7 +1015,7 @@ static void TestHopLimit1(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1090,8 +1030,7 @@ static void TestHopLimit255(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultShort);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 255,
-                           "fe80::ff:fe00:0000",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 255, "fe80::ff:fe00:0000",
                            "fe80::ff:fe00:c003");
 
     // Set LOWPAN_IPHC header.
@@ -1101,7 +1040,7 @@ static void TestHopLimit255(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1116,8 +1055,7 @@ static void TestHopLimitInline(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultShort);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 63,
-                           "fe80::ff:fe00:0000",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 63, "fe80::ff:fe00:0000",
                            "fe80::ff:fe00:c003");
 
     // Set LOWPAN_IPHC header.
@@ -1127,7 +1065,7 @@ static void TestHopLimitInline(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1142,8 +1080,7 @@ static void TestUdpSourceDestinationInline(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64, "fe80::200:5eef:1022:1100",
                            "fe80::200:5eef:10aa:bbcc");
 
     // Setup UDP header.
@@ -1156,7 +1093,7 @@ static void TestUdpSourceDestinationInline(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(48);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1171,8 +1108,7 @@ static void TestUdpSourceInlineDestination8bit(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64, "fe80::200:5eef:1022:1100",
                            "fe80::200:5eef:10aa:bbcc");
 
     // Setup UDP header.
@@ -1185,7 +1121,7 @@ static void TestUdpSourceInlineDestination8bit(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(48);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1200,8 +1136,7 @@ static void TestUdpSource8bitDestinationInline(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64, "fe80::200:5eef:1022:1100",
                            "fe80::200:5eef:10aa:bbcc");
 
     // Setup UDP header.
@@ -1214,7 +1149,7 @@ static void TestUdpSource8bitDestinationInline(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(48);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1229,8 +1164,7 @@ static void TestUdpFullyCompressed(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64, "fe80::200:5eef:1022:1100",
                            "fe80::200:5eef:10aa:bbcc");
 
     // Setup UDP header.
@@ -1243,7 +1177,7 @@ static void TestUdpFullyCompressed(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(48);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1258,8 +1192,7 @@ static void TestUdpFullyCompressedMulticast(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64, "fe80::200:5eef:1022:1100",
                            "ff02::1");
 
     // Setup UDP header.
@@ -1272,7 +1205,7 @@ static void TestUdpFullyCompressedMulticast(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(48);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1287,8 +1220,7 @@ static void TestUdpWithoutNhc(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultShort);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoUdp, 64,
-                           "fe80::ff:fe00:0000",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoUdp, 64, "fe80::ff:fe00:0000",
                            "fe80::ff:fe00:c003");
 
     // Set LOWPAN_IPHC header.
@@ -1298,7 +1230,7 @@ static void TestUdpWithoutNhc(void)
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(40);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform only decompression test.
     Test(testVector, false, true);
@@ -1314,23 +1246,20 @@ static void TestExtensionHeaderHopByHopNoPadding(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoHopOpts, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "ff03::1");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "ff03::1");
 
     // Setup extension header.
     uint8_t extHeader[] = {0x3a, 0x00, 0x6d, 0x04, 0x60, 0x11, 0x00, 0x0c};
     testVector.SetExtHeader(extHeader, sizeof(extHeader));
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a,
-                      0x06, 0x6d, 0x04, 0x60, 0x11, 0x00, 0x0c
-                     };
+    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a, 0x06, 0x6d, 0x04, 0x60, 0x11, 0x00, 0x0c};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(48);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1346,23 +1275,20 @@ static void TestExtensionHeaderHopByHopPad1(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoHopOpts, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "ff03::1");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "ff03::1");
 
     // Setup extension header.
     uint8_t extHeader[] = {0x3a, 0x00, 0x6d, 0x03, 0x60, 0x11, 0x00, 0x00};
     testVector.SetExtHeader(extHeader, sizeof(extHeader));
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a,
-                      0x05, 0x6d, 0x03, 0x60, 0x11, 0x00
-                     };
+    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a, 0x05, 0x6d, 0x03, 0x60, 0x11, 0x00};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(48);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1378,23 +1304,20 @@ static void TestExtensionHeaderHopByHopPadN2(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoHopOpts, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "ff03::1");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "ff03::1");
 
     // Setup extension header.
     uint8_t extHeader[] = {0x3a, 0x00, 0x6d, 0x02, 0x60, 0x11, 0x01, 0x00};
     testVector.SetExtHeader(extHeader, sizeof(extHeader));
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a,
-                      0x04, 0x6d, 0x02, 0x60, 0x11
-                     };
+    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a, 0x04, 0x6d, 0x02, 0x60, 0x11};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(48);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1410,23 +1333,20 @@ static void TestExtensionHeaderHopByHopPadN3(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoHopOpts, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "ff03::1");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "ff03::1");
 
     // Setup extension header.
     uint8_t extHeader[] = {0x3a, 0x00, 0x6d, 0x01, 0x60, 0x01, 0x01, 0x00};
     testVector.SetExtHeader(extHeader, sizeof(extHeader));
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a,
-                      0x03, 0x6d, 0x01, 0x60
-                     };
+    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a, 0x03, 0x6d, 0x01, 0x60};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(48);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1442,23 +1362,20 @@ static void TestExtensionHeaderHopByHopPadN4(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoHopOpts, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "ff03::1");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "ff03::1");
 
     // Setup extension header.
     uint8_t extHeader[] = {0x3a, 0x00, 0x6d, 0x00, 0x01, 0x02, 0x00, 0x00};
     testVector.SetExtHeader(extHeader, sizeof(extHeader));
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a,
-                      0x02, 0x6d, 0x00
-                     };
+    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a, 0x02, 0x6d, 0x00};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(48);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1474,26 +1391,22 @@ static void TestExtensionHeaderHopByHopPadN5(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 16, Ip6::kProtoHopOpts, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "ff03::1");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "ff03::1");
 
     // Setup extension header.
     uint8_t extHeader[] = {0x3a, 0x01, 0x6d, 0x07, 0x01, 0x02, 0x01, 0x00,
-                           0x00, 0x00, 0x33, 0x01, 0x03, 0x00, 0x00, 0x00
-                          };
+                           0x00, 0x00, 0x33, 0x01, 0x03, 0x00, 0x00, 0x00};
     testVector.SetExtHeader(extHeader, sizeof(extHeader));
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a,
-                      0x09, 0x6d, 0x07, 0x01, 0x02, 0x01, 0x00, 0x00,
-                      0x00, 0x33
-                     };
+    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a, 0x09,
+                      0x6d, 0x07, 0x01, 0x02, 0x01, 0x00, 0x00, 0x00, 0x33};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(56);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1509,28 +1422,22 @@ static void TestExtensionHeaderHopByHopPadN6(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 24, Ip6::kProtoHopOpts, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "ff03::1");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "ff03::1");
 
     // Setup extension header.
-    uint8_t extHeader[] = {0x3a, 0x02, 0x6d, 0x0e, 0x01, 0x02, 0x01, 0x00,
-                           0x00, 0x00, 0x33, 0x01, 0x03, 0x00, 0x00, 0x00,
-                           0x11, 0x00, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00
-                          };
+    uint8_t extHeader[] = {0x3a, 0x02, 0x6d, 0x0e, 0x01, 0x02, 0x01, 0x00, 0x00, 0x00, 0x33, 0x01,
+                           0x03, 0x00, 0x00, 0x00, 0x11, 0x00, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00};
     testVector.SetExtHeader(extHeader, sizeof(extHeader));
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a,
-                      0x10, 0x6d, 0x0e, 0x01, 0x02, 0x01, 0x00, 0x00,
-                      0x00, 0x33, 0x01, 0x03, 0x00, 0x00, 0x00, 0x11,
-                      0x00
-                     };
+    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a, 0x10, 0x6d, 0x0e, 0x01, 0x02,
+                      0x01, 0x00, 0x00, 0x00, 0x33, 0x01, 0x03, 0x00, 0x00, 0x00, 0x11, 0x00};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(64);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1546,27 +1453,22 @@ static void TestExtensionHeaderHopByHopPadN7(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 24, Ip6::kProtoHopOpts, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "ff03::1");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "ff03::1");
 
     // Setup extension header.
-    uint8_t extHeader[] = {0x3a, 0x02, 0x6d, 0x0d, 0x01, 0x02, 0x01, 0x00,
-                           0x00, 0x00, 0x33, 0x01, 0x03, 0x00, 0x00, 0x00,
-                           0x11, 0x01, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00
-                          };
+    uint8_t extHeader[] = {0x3a, 0x02, 0x6d, 0x0d, 0x01, 0x02, 0x01, 0x00, 0x00, 0x00, 0x33, 0x01,
+                           0x03, 0x00, 0x00, 0x00, 0x11, 0x01, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00};
     testVector.SetExtHeader(extHeader, sizeof(extHeader));
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a,
-                      0x0f, 0x6d, 0x0d, 0x01, 0x02, 0x01, 0x00, 0x00,
-                      0x00, 0x33, 0x01, 0x03, 0x00, 0x00, 0x00, 0x11
-                     };
+    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe0, 0x3a, 0x0f, 0x6d, 0x0d, 0x01,
+                      0x02, 0x01, 0x00, 0x00, 0x00, 0x33, 0x01, 0x03, 0x00, 0x00, 0x00, 0x11};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(64);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1582,8 +1484,7 @@ static void TestExtensionHeaderHopByHopPadN2UdpFullyCompressed(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 16, Ip6::kProtoHopOpts, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "ff03::1");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "ff03::1");
 
     // Setup extension header.
     uint8_t extHeader[] = {0x11, 0x00, 0x6d, 0x02, 0x60, 0x11, 0x01, 0x00};
@@ -1593,15 +1494,13 @@ static void TestExtensionHeaderHopByHopPadN2UdpFullyCompressed(void)
     testVector.SetUDPHeader(61616, 61631, sizeof(sTestPayloadDefault) + 8, 0xface);
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe1, 0x04,
-                      0x6d, 0x02, 0x60, 0x11, 0xf3, 0x0f, 0xfa, 0xce
-                     };
+    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0x01, 0xe1, 0x04, 0x6d, 0x02, 0x60, 0x11, 0xf3, 0x0f, 0xfa, 0xce};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(56);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1617,8 +1516,7 @@ static void TestIpInIpHopByHopPadN2UdpSourceDestinationInline(void)
 
     // Setup IPv6 header.
     testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 56, Ip6::kProtoHopOpts, 64,
-                           "fd00:cafe:face:1234::ff:fe00:0000",
-                           "ff03::fc");
+                           "fd00:cafe:face:1234::ff:fe00:0000", "ff03::fc");
 
     // Setup extension header.
     uint8_t extHeader[] = {0x29, 0x00, 0x6d, 0x02, 0x00, 0x11, 0x01, 0x00};
@@ -1626,24 +1524,20 @@ static void TestIpInIpHopByHopPadN2UdpSourceDestinationInline(void)
 
     // Setup IPv6 tunneled header.
     testVector.SetIpTunneledHeader(0x60000000, sizeof(sTestPayloadDefault) + 8, Ip6::kProtoUdp, 64,
-                                   "fd00:cafe:face:1234::ff:fe00:0000",
-                                   "ff05::1");
+                                   "fd00:cafe:face:1234::ff:fe00:0000", "ff05::1");
 
     // Setup UDP header.
     testVector.SetUDPHeader(5683, 5684, sizeof(sTestPayloadDefault) + 8, 0xbeef);
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0xfc, 0xe1, 0x04,
-                      0x6d, 0x02, 0x00, 0x11, 0xee, 0x7e, 0x7a, 0x05,
-                      0x00, 0x00, 0x01, 0xf0, 0x16, 0x33, 0x16, 0x34,
-                      0xbe, 0xef
-                     };
+    uint8_t iphc[] = {0x7e, 0x7a, 0x03, 0x00, 0x00, 0xfc, 0xe1, 0x04, 0x6d, 0x02, 0x00, 0x11, 0xee,
+                      0x7e, 0x7a, 0x05, 0x00, 0x00, 0x01, 0xf0, 0x16, 0x33, 0x16, 0x34, 0xbe, 0xef};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(96);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1658,25 +1552,21 @@ static void TestIpInIpWithoutExtensionHeader(void)
     testVector.SetMacDestination(sTestMacDestinationDefaultLong);
 
     // Setup IPv6 header.
-    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 40, Ip6::kProtoIp6, 64,
-                           "fe80::200:5eef:1022:1100",
+    testVector.SetIpHeader(0x60000000, sizeof(sTestPayloadDefault) + 40, Ip6::kProtoIp6, 64, "fe80::200:5eef:1022:1100",
                            "ff03::1");
 
     // Setup IPv6 tunneled header.
     testVector.SetIpTunneledHeader(0x60000000, sizeof(sTestPayloadDefault), Ip6::kProtoIcmp6, 1,
-                                   "fe80::200:5eef:1022:1100",
-                                   "fe80::200:5eef:10aa:bbcc");
+                                   "fe80::200:5eef:1022:1100", "fe80::200:5eef:10aa:bbcc");
 
     // Set LOWPAN_IPHC header.
-    uint8_t iphc[] = {0x7e, 0x3a, 0x03, 0x00, 0x00, 0x01, 0xee, 0x79,
-                      0x33, 0x3a
-                     };
+    uint8_t iphc[] = {0x7e, 0x3a, 0x03, 0x00, 0x00, 0x01, 0xee, 0x79, 0x33, 0x3a};
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
     testVector.SetPayload(sTestPayloadDefault, sizeof(sTestPayloadDefault));
     testVector.SetPayloadOffset(80);
-    testVector.SetError(kThreadError_None);
+    testVector.SetError(OT_ERROR_NONE);
 
     // Perform compression and decompression tests.
     Test(testVector, true, true);
@@ -1695,7 +1585,7 @@ static void TestErrorNoIphcDispatch(void)
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
-    testVector.SetError(kThreadError_Parse);
+    testVector.SetError(OT_ERROR_PARSE);
 
     // Perform decompression test.
     Test(testVector, false, true);
@@ -1714,7 +1604,7 @@ static void TestErrorTruncatedIphc(void)
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
-    testVector.SetError(kThreadError_Parse);
+    testVector.SetError(OT_ERROR_PARSE);
 
     // Perform decompression test.
     Test(testVector, false, true);
@@ -1733,7 +1623,7 @@ static void TestErrorReservedValueDestination0100(void)
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
-    testVector.SetError(kThreadError_Parse);
+    testVector.SetError(OT_ERROR_PARSE);
 
     // Perform decompression test.
     Test(testVector, false, true);
@@ -1752,7 +1642,7 @@ static void TestErrorReservedValueDestination1101(void)
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
-    testVector.SetError(kThreadError_Parse);
+    testVector.SetError(OT_ERROR_PARSE);
 
     // Perform decompression test.
     Test(testVector, false, true);
@@ -1771,7 +1661,7 @@ static void TestErrorReservedValueDestination1110(void)
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
-    testVector.SetError(kThreadError_Parse);
+    testVector.SetError(OT_ERROR_PARSE);
 
     // Perform decompression test.
     Test(testVector, false, true);
@@ -1790,7 +1680,7 @@ static void TestErrorReservedValueDestination1111(void)
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
-    testVector.SetError(kThreadError_Parse);
+    testVector.SetError(OT_ERROR_PARSE);
 
     // Perform decompression test.
     Test(testVector, false, true);
@@ -1809,7 +1699,7 @@ static void TestErrorUnknownNhc(void)
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
-    testVector.SetError(kThreadError_Parse);
+    testVector.SetError(OT_ERROR_PARSE);
 
     // Perform decompression test.
     Test(testVector, false, true);
@@ -1828,7 +1718,7 @@ static void TestErrorReservedNhc5(void)
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
-    testVector.SetError(kThreadError_Parse);
+    testVector.SetError(OT_ERROR_PARSE);
 
     // Perform decompression test.
     Test(testVector, false, true);
@@ -1847,7 +1737,7 @@ static void TestErrorReservedNhc6(void)
     testVector.SetIphcHeader(iphc, sizeof(iphc));
 
     // Set payload and error.
-    testVector.SetError(kThreadError_Parse);
+    testVector.SetError(OT_ERROR_PARSE);
 
     // Perform decompression test.
     Test(testVector, false, true);
@@ -1859,6 +1749,13 @@ static void TestErrorReservedNhc6(void)
 
 void TestLowpanIphc(void)
 {
+    sInstance = testInitInstance();
+
+    VerifyOrQuit(sInstance != NULL, "NULL instance");
+
+    sIp6    = &sInstance->Get<Ip6::Ip6>();
+    sLowpan = &sInstance->Get<Lowpan::Lowpan>();
+
     Init();
 
     // Stateless unicast addresses compression / decompression tests.
@@ -1938,9 +1835,11 @@ void TestLowpanIphc(void)
     TestErrorUnknownNhc();
     TestErrorReservedNhc5();
     TestErrorReservedNhc6();
+
+    testFreeInstance(sInstance);
 }
 
-}  // namespace Thread
+} // namespace ot
 
 #ifdef ENABLE_TEST_MAIN
 int main(void)

@@ -34,12 +34,14 @@
  *   This file includes definitions for MPL.
  */
 
-#include <openthread-types.h>
-#include <common/message.hpp>
-#include <common/timer.hpp>
-#include <net/ip6_headers.hpp>
+#include "openthread-core-config.h"
 
-namespace Thread {
+#include "common/locator.hpp"
+#include "common/message.hpp"
+#include "common/timer.hpp"
+#include "net/ip6_headers.hpp"
+
+namespace ot {
 namespace Ip6 {
 
 /**
@@ -57,12 +59,12 @@ namespace Ip6 {
  *
  */
 OT_TOOL_PACKED_BEGIN
-class OptionMpl: public OptionHeader
+class OptionMpl : public OptionHeader
 {
 public:
     enum
     {
-        kType = 0x6d,    /* 01 1 01101 */
+        kType      = 0x6d, /* 01 1 01101 */
         kMinLength = 2
     };
 
@@ -70,7 +72,8 @@ public:
      * This method initializes the MPL header.
      *
      */
-    void Init(void) {
+    void Init(void)
+    {
         OptionHeader::SetType(kType);
         OptionHeader::SetLength(sizeof(*this) - sizeof(OptionHeader));
         mControl = 0;
@@ -90,10 +93,10 @@ public:
      */
     enum SeedIdLength
     {
-        kSeedIdLength0  = 0 << 6,  ///< 0-byte MPL Seed Id Length.
-        kSeedIdLength2  = 1 << 6,  ///< 2-byte MPL Seed Id Length.
-        kSeedIdLength8  = 2 << 6,  ///< 8-byte MPL Seed Id Length.
-        kSeedIdLength16 = 3 << 6,  ///< 16-byte MPL Seed Id Length.
+        kSeedIdLength0  = 0 << 6, ///< 0-byte MPL Seed Id Length.
+        kSeedIdLength2  = 1 << 6, ///< 2-byte MPL Seed Id Length.
+        kSeedIdLength8  = 2 << 6, ///< 8-byte MPL Seed Id Length.
+        kSeedIdLength16 = 3 << 6, ///< 16-byte MPL Seed Id Length.
     };
 
     /**
@@ -110,7 +113,10 @@ public:
      * @param[in]  aSeedIdLength  The MPL Seed Length.
      *
      */
-    void SetSeedIdLength(SeedIdLength aSeedIdLength) { mControl = static_cast<uint8_t>((mControl & ~kSeedIdLengthMask) | aSeedIdLength); }
+    void SetSeedIdLength(SeedIdLength aSeedIdLength)
+    {
+        mControl = static_cast<uint8_t>((mControl & ~kSeedIdLengthMask) | aSeedIdLength);
+    }
 
     /**
      * This method indicates whether or not the MPL M flag is set.
@@ -119,7 +125,7 @@ public:
      * @retval FALSE  If the MPL M flag is not set.
      *
      */
-    bool IsMaxFlagSet(void) { return (mControl & kMaxFlag) != 0; }
+    bool IsMaxFlagSet(void) const { return (mControl & kMaxFlag) != 0; }
 
     /**
      * This method clears the MPL M flag.
@@ -169,7 +175,7 @@ private:
     enum
     {
         kSeedIdLengthMask = 3 << 6,
-        kMaxFlag = 1 << 5
+        kMaxFlag          = 1 << 5
     };
     uint8_t  mControl;
     uint8_t  mSequence;
@@ -249,60 +255,60 @@ public:
      * Default constructor for the object.
      *
      */
-    MplBufferedMessageMetadata(void):
-        mSeedId(0),
-        mSequence(0),
-        mTransmissionCount(0),
-        mTransmissionTime(0),
-        mIntervalOffset(0) {
-    };
+    MplBufferedMessageMetadata(void)
+        : mSeedId(0)
+        , mSequence(0)
+        , mTransmissionCount(0)
+        , mTransmissionTime(0)
+        , mIntervalOffset(0){};
 
     /**
      * This method appends MPL Buffered Message metadata to the message.
      *
      * @param[in]  aMessage  A reference to the message.
      *
-     * @retval kThreadError_None    Successfully appended the bytes.
-     * @retval kThreadError_NoBufs  Insufficient available buffers to grow the message.
+     * @retval OT_ERROR_NONE     Successfully appended the bytes.
+     * @retval OT_ERROR_NO_BUFS  Insufficient available buffers to grow the message.
      *
      */
-    ThreadError AppendTo(Message &aMessage) const {
-        return aMessage.Append(this, sizeof(*this));
-    };
+    otError AppendTo(Message &aMessage) const { return aMessage.Append(this, sizeof(*this)); }
 
     /**
      * This method reads request data from the message.
      *
      * @param[in]  aMessage  A reference to the message.
      *
-     * @returns The number of bytes that have been read.
-     *
      */
-    uint16_t ReadFrom(const Message &aMessage) {
-        return aMessage.Read(aMessage.GetLength() - sizeof(*this), sizeof(*this), this);
-    };
+    void ReadFrom(const Message &aMessage)
+    {
+        uint16_t length = aMessage.Read(aMessage.GetLength() - sizeof(*this), sizeof(*this), this);
+        assert(length == sizeof(*this));
+        OT_UNUSED_VARIABLE(length);
+    }
 
     /**
-     * This method removes MPL Buffered Messsage metadata from the message.
+     * This method removes MPL Buffered Message metadata from the message.
      *
      * @param[in]  aMessage  A reference to the message.
      *
-     * @retval kThreadError_None  Successfully removed the header.
-     *
      */
-    ThreadError RemoveFrom(Message &aMessage) {
-        return aMessage.SetLength(aMessage.GetLength() - sizeof(*this));
-    };
+    static void RemoveFrom(Message &aMessage)
+    {
+        otError error = aMessage.SetLength(aMessage.GetLength() - sizeof(MplBufferedMessageMetadata));
+        assert(error == OT_ERROR_NONE);
+        OT_UNUSED_VARIABLE(error);
+    }
 
     /**
-     * This method updates MPL Buffered Messsage metadata in the message.
+     * This method updates MPL Buffered Message metadata in the message.
      *
      * @param[in]  aMessage  A reference to the message.
      *
      * @returns The number of bytes that have been updated.
      *
      */
-    int UpdateIn(Message &aMessage) const {
+    int UpdateIn(Message &aMessage) const
+    {
         return aMessage.Write(aMessage.GetLength() - sizeof(*this), sizeof(*this), this);
     }
 
@@ -314,7 +320,7 @@ public:
      * @retval TRUE   If the message shall be sent before the given time.
      * @retval FALSE  Otherwise.
      */
-    bool IsEarlier(uint32_t aTime) const { return (static_cast<int32_t>(aTime - mTransmissionTime) > 0); };
+    bool IsEarlier(uint32_t aTime) const { return (static_cast<int32_t>(aTime - mTransmissionTime) > 0); }
 
     /**
      * This method checks if the message shall be sent after the given time.
@@ -324,7 +330,7 @@ public:
      * @retval TRUE   If the message shall be sent after the given time.
      * @retval FALSE  Otherwise.
      */
-    bool IsLater(uint32_t aTime) const { return (static_cast<int32_t>(aTime - mTransmissionTime) < 0); };
+    bool IsLater(uint32_t aTime) const { return (static_cast<int32_t>(aTime - mTransmissionTime) < 0); }
 
     /**
      * This method returns the MPL Seed Id value.
@@ -393,7 +399,7 @@ public:
     /**
      * This method returns the offset from the transmission time to the end of trickle interval.
      *
-     * @returns The offset from the the transmission time to the end of trickle interval.
+     * @returns The offset from the transmission time to the end of trickle interval.
      *
      */
     uint8_t GetIntervalOffset(void) const { return mIntervalOffset; }
@@ -401,7 +407,7 @@ public:
     /**
      * This method sets the offset from the transmission time to the end of trickle interval.
      *
-     * @param[in]  aIntervalOffset  The offset from the the transmission time to the end of trickle interval.
+     * @param[in]  aIntervalOffset  The offset from the transmission time to the end of trickle interval.
      *
      */
     void SetIntervalOffset(uint8_t aIntervalOffset) { mIntervalOffset = aIntervalOffset; }
@@ -426,16 +432,16 @@ private:
  * This class implements MPL message processing.
  *
  */
-class Mpl
+class Mpl : public InstanceLocator
 {
 public:
     /**
      * This constructor initializes the MPL object.
      *
-     * @param[in]  aIp6  A reference to the IPv6 network object.
+     * @param[in]  aInstance  A reference to the OpenThread instance.
      *
      */
-    Mpl(Ip6 &aIp6);
+    explicit Mpl(Instance &aInstance);
 
     /**
      * This method initializes the MPL option.
@@ -456,11 +462,11 @@ public:
      * @param[in]  aAddress    A reference to the IPv6 Source Address.
      * @param[in]  aIsOutbound TRUE if this message was locally generated, FALSE otherwise.
      *
-     * @retval kThreadError_None  Successfully processed the MPL option.
-     * @retval kThreadError_Drop  The MPL message is a duplicate and should be dropped.
+     * @retval OT_ERROR_NONE  Successfully processed the MPL option.
+     * @retval OT_ERROR_DROP  The MPL message is a duplicate and should be dropped.
      *
      */
-    ThreadError ProcessOption(Message &aMessage, const Address &aAddress, bool aIsOutbound);
+    otError ProcessOption(Message &aMessage, const Address &aAddress, bool aIsOutbound);
 
     /**
      * This method returns the MPL Seed Id value.
@@ -515,43 +521,41 @@ public:
 private:
     enum
     {
-        kNumSeedEntries = OPENTHREAD_CONFIG_MPL_SEED_SET_ENTRIES,
-        kSeedEntryLifetime = OPENTHREAD_CONFIG_MPL_SEED_SET_ENTRY_LIFETIME,
+        kNumSeedEntries      = OPENTHREAD_CONFIG_MPL_SEED_SET_ENTRIES,
+        kSeedEntryLifetime   = OPENTHREAD_CONFIG_MPL_SEED_SET_ENTRY_LIFETIME,
         kSeedEntryLifetimeDt = 1000,
         kDataMessageInterval = 64
     };
 
-    ThreadError UpdateSeedSet(uint16_t aSeedId, uint8_t aSequence);
-    void UpdateBufferedSet(uint16_t aSeedId, uint8_t aSequence);
-    void AddBufferedMessage(Message &aMessage, uint16_t aSeedId, uint8_t aSequence, bool aIsOutbound);
+    otError UpdateSeedSet(uint16_t aSeedId, uint8_t aSequence);
+    void    UpdateBufferedSet(uint16_t aSeedId, uint8_t aSequence);
+    void    AddBufferedMessage(Message &aMessage, uint16_t aSeedId, uint8_t aSequence, bool aIsOutbound);
 
-    static void HandleSeedSetTimer(void *aContext);
-    void HandleSeedSetTimer(void);
+    static void HandleSeedSetTimer(Timer &aTimer);
+    void        HandleSeedSetTimer(void);
 
-    static void HandleRetransmissionTimer(void *aContext);
-    void HandleRetransmissionTimer(void);
+    static void HandleRetransmissionTimer(Timer &aTimer);
+    void        HandleRetransmissionTimer(void);
 
-    Ip6 &mIp6;
-
-    Timer mSeedSetTimer;
-    Timer mRetransmissionTimer;
-
-    uint8_t mTimerExpirations;
-    uint8_t mSequence;
+    uint8_t  mTimerExpirations;
+    uint8_t  mSequence;
     uint16_t mSeedId;
+
+    TimerMilli mSeedSetTimer;
+    TimerMilli mRetransmissionTimer;
+
     const Address *mMatchingAddress;
 
     MplSeedEntry mSeedSet[kNumSeedEntries];
     MessageQueue mBufferedMessageSet;
 };
 
-
 /**
  * @}
  *
  */
 
-}  // namespace Ip6
-}  // namespace Thread
+} // namespace Ip6
+} // namespace ot
 
-#endif  // NET_IP6_MPL_HPP_
+#endif // IP6_MPL_HPP_

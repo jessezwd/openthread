@@ -34,84 +34,74 @@
 #ifndef ENERGY_SCAN_SERVER_HPP_
 #define ENERGY_SCAN_SERVER_HPP_
 
-#include <openthread-core-config.h>
-#include <openthread-types.h>
-#include <coap/coap_client.hpp>
-#include <coap/coap_server.hpp>
-#include <common/timer.hpp>
-#include <net/ip6_address.hpp>
-#include <net/udp6.hpp>
+#include "openthread-core-config.h"
 
-namespace Thread {
+#include "coap/coap.hpp"
+#include "common/locator.hpp"
+#include "common/notifier.hpp"
+#include "common/timer.hpp"
+#include "net/ip6_address.hpp"
+#include "net/udp6.hpp"
+#include "thread/thread_tlvs.hpp"
 
-class MeshForwarder;
-class ThreadLastTransactionTimeTlv;
-class ThreadMeshLocalEidTlv;
-class ThreadNetif;
-class ThreadTargetTlv;
+namespace ot {
 
 /**
  * This class implements handling Energy Scan Requests.
  *
  */
-class EnergyScanServer
+class EnergyScanServer : public InstanceLocator
 {
 public:
     /**
      * This constructor initializes the object.
      *
      */
-    EnergyScanServer(ThreadNetif &aThreadNetif);
+    explicit EnergyScanServer(Instance &aInstance);
 
 private:
     enum
     {
-        kScanDelay   = 1000,  ///< SCAN_DELAY (milliseconds)
-        kReportDelay = 500,   ///< Delay before sending a report (milliseconds)
+        kScanDelay   = 1000, ///< SCAN_DELAY (milliseconds)
+        kReportDelay = 500,  ///< Delay before sending a report (milliseconds)
     };
 
-    static void HandleRequest(void *aContext, otCoapHeader *aHeader, otMessage aMessage,
-                              const otMessageInfo *aMessageInfo);
-    void HandleRequest(Coap::Header &aHeader, Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
+    static void HandleRequest(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
+    void        HandleRequest(Coap::Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
 
-    static void HandleScanResult(void *aContext, otEnergyScanResult *aResult);
-    void HandleScanResult(otEnergyScanResult *aResult);
+    static void HandleScanResult(Instance &aInstance, otEnergyScanResult *aResult);
+    void        HandleScanResult(otEnergyScanResult *aResult);
 
-    static void HandleTimer(void *aContext);
-    void HandleTimer(void);
+    static void HandleTimer(Timer &aTimer);
+    void        HandleTimer(void);
 
-    static void HandleNetifStateChanged(uint32_t aFlags, void *aContext);
-    void HandleNetifStateChanged(uint32_t aFlags);
+    static void HandleStateChanged(Notifier::Callback &aCallback, otChangedFlags aFlags);
+    void        HandleStateChanged(otChangedFlags aFlags);
 
-    ThreadError SendReport(void);
-    ThreadError SendResponse(const Coap::Header &aRequestHeader, const Ip6::MessageInfo &aRequestMessageInfo);
+    otError SendReport(void);
 
     Ip6::Address mCommissioner;
-    uint32_t mChannelMask;
-    uint32_t mChannelMaskCurrent;
-    uint16_t mPeriod;
-    uint16_t mScanDuration;
-    uint8_t mCount;
-    bool mActive;
+    uint32_t     mChannelMask;
+    uint32_t     mChannelMaskCurrent;
+    uint16_t     mPeriod;
+    uint16_t     mScanDuration;
+    uint8_t      mCount;
+    bool         mActive;
 
-    int8_t mScanResults[OPENTHREAD_CONFIG_MAX_ENERGY_RESULTS];
+    int8_t  mScanResults[OPENTHREAD_CONFIG_MAX_ENERGY_RESULTS];
     uint8_t mScanResultsLength;
 
-    Timer mTimer;
+    TimerMilli mTimer;
 
-    Ip6::NetifCallback mNetifCallback;
+    Notifier::Callback mNotifierCallback;
 
     Coap::Resource mEnergyScan;
-    Coap::Server &mCoapServer;
-    Coap::Client &mCoapClient;
-
-    ThreadNetif &mNetif;
 };
 
 /**
  * @}
  */
 
-}  // namespace Thread
+} // namespace ot
 
-#endif  // ENERGY_SCAN_SERVER_HPP_
+#endif // ENERGY_SCAN_SERVER_HPP_

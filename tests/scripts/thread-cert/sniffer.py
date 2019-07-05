@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -30,7 +30,10 @@
 import collections
 import io
 import logging
+import os
+import pcap
 import threading
+import traceback
 
 try:
     import Queue
@@ -59,6 +62,8 @@ class Sniffer:
         self.nodeid = nodeid
         self._message_factory = message_factory
 
+        self._pcap = pcap.PcapCodec(os.getenv('TEST_NAME', 'current'))
+
         # Create transport
         transport_factory = sniffer_transport.SnifferTransportFactory()
         self._transport = transport_factory.create_transport(nodeid)
@@ -69,9 +74,6 @@ class Sniffer:
 
         self._buckets = collections.defaultdict(Queue.Queue)
 
-    def __del__(self):
-        del self._transport
-
     def _sniffer_main_loop(self):
         """ Sniffer main loop. """
 
@@ -80,11 +82,19 @@ class Sniffer:
         while self._thread_alive.is_set():
             data, nodeid = self._transport.recv(self.RECV_BUFFER_SIZE)
 
-            msg = self._message_factory.create(io.BytesIO(data))
+            self._pcap.append(data)
 
-            if msg is not None:
-                self.logger.debug("Received message: {}".format(msg))
-                self._buckets[nodeid].put(msg)
+            # Ignore any exceptions
+            try:
+                messages = self._message_factory.create(io.BytesIO(data))
+                self.logger.debug("Received messages: {}".format(messages))
+                for msg in messages:
+                    self._buckets[nodeid].put(msg)
+
+            except Exception as e:
+                # Just print the exception to the console
+                print("EXCEPTION: %s" % e)
+                traceback.print_exc()
 
         self.logger.debug("Sniffer stopped.")
 
@@ -103,10 +113,14 @@ class Sniffer:
         """ Stop sniffing. """
 
         self._thread_alive.clear()
+
+        self._transport.close()
+
         self._thread.join()
         self._thread = None
 
-        self._transport.close()
+    def set_lowpan_context(self, cid, prefix):
+        self._message_factory.set_lowpan_context(cid, prefix)
 
     def get_messages_sent_by(self, nodeid):
         """ Get sniffed messages.

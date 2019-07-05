@@ -31,95 +31,235 @@
  *   This file implements UDP/IPv6 sockets.
  */
 
+#include "udp6.hpp"
+
 #include <stdio.h>
 
-#include <common/code_utils.hpp>
-#include <common/encoding.hpp>
-#include <net/ip6.hpp>
-#include <net/udp6.hpp>
+#include <openthread/platform/udp.h>
 
-using Thread::Encoding::BigEndian::HostSwap16;
+#include "common/code_utils.hpp"
+#include "common/encoding.hpp"
+#include "common/instance.hpp"
+#include "common/locator-getters.hpp"
+#include "net/ip6.hpp"
 
-namespace Thread {
+using ot::Encoding::BigEndian::HostSwap16;
+
+namespace ot {
 namespace Ip6 {
 
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
+static bool IsMle(Instance &aInstance, uint16_t aPort)
+{
+#if OPENTHREAD_FTD
+    return aPort == ot::Mle::kUdpPort || aPort == aInstance.Get<MeshCoP::JoinerRouter>().GetJoinerUdpPort();
+#else
+    return aPort == ot::Mle::kUdpPort;
+#endif
+}
+#endif
+
 UdpSocket::UdpSocket(Udp &aUdp)
+    : InstanceLocator(aUdp.GetInstance())
 {
-    mTransport = &aUdp;
+    mHandle = NULL;
 }
 
-Message *UdpSocket::NewMessage(uint16_t aReserved)
+Message *UdpSocket::NewMessage(uint16_t aReserved, const otMessageSettings *aSettings)
 {
-    return static_cast<Udp *>(mTransport)->NewMessage(aReserved);
+    return Get<Udp>().NewMessage(aReserved, aSettings);
 }
 
-ThreadError UdpSocket::Open(otUdpReceive aHandler, void *aContext)
+otError UdpSocket::Open(otUdpReceive aHandler, void *aContext)
 {
+    otError error = OT_ERROR_NONE;
+
     memset(&mSockName, 0, sizeof(mSockName));
     memset(&mPeerName, 0, sizeof(mPeerName));
     mHandler = aHandler;
     mContext = aContext;
 
-    return static_cast<Udp *>(mTransport)->AddSocket(*this);
-}
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
+    SuccessOrExit(error = otPlatUdpSocket(this));
+#endif
 
-ThreadError UdpSocket::Bind(const SockAddr &aSockAddr)
-{
-    mSockName = aSockAddr;
-    return kThreadError_None;
-}
+    Get<Udp>().AddSocket(*this);
 
-ThreadError UdpSocket::Close(void)
-{
-    ThreadError error = kThreadError_None;
-
-    SuccessOrExit(error = static_cast<Udp *>(mTransport)->RemoveSocket(*this));
-    memset(&mSockName, 0, sizeof(mSockName));
-    memset(&mPeerName, 0, sizeof(mPeerName));
-
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
 exit:
+#endif
     return error;
 }
 
-ThreadError UdpSocket::SendTo(Message &aMessage, const MessageInfo &aMessageInfo)
+otError UdpSocket::Bind(const SockAddr &aSockAddr)
 {
-    ThreadError error = kThreadError_None;
+    otError error = OT_ERROR_NONE;
+
+    mSockName = aSockAddr;
+
+    if (!IsBound())
+    {
+        do
+        {
+            mSockName.mPort = Get<Udp>().GetEphemeralPort();
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
+            error = otPlatUdpBind(this);
+#endif
+        } while (error != OT_ERROR_NONE);
+    }
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
+    else if (!IsMle(GetInstance(), mSockName.mPort))
+    {
+        error = otPlatUdpBind(this);
+    }
+#endif
+
+    return error;
+}
+
+otError UdpSocket::Connect(const SockAddr &aSockAddr)
+{
+    otError error = OT_ERROR_NONE;
+
+    mPeerName = aSockAddr;
+
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
+    if (!IsMle(GetInstance(), mSockName.mPort))
+    {
+        error = otPlatUdpConnect(this);
+    }
+#endif
+    return error;
+}
+
+otError UdpSocket::Close(void)
+{
+    otError error = OT_ERROR_NONE;
+
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
+    SuccessOrExit(error = otPlatUdpClose(this));
+#endif
+
+    Get<Udp>().RemoveSocket(*this);
+    memset(&mSockName, 0, sizeof(mSockName));
+    memset(&mPeerName, 0, sizeof(mPeerName));
+
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
+exit:
+#endif
+    return error;
+}
+
+otError UdpSocket::SendTo(Message &aMessage, const MessageInfo &aMessageInfo)
+{
+    otError     error = OT_ERROR_NONE;
     MessageInfo messageInfoLocal;
-    UdpHeader udpHeader;
+
+    VerifyOrExit((aMessageInfo.GetSockPort() == 0) || (GetSockName().mPort == aMessageInfo.GetSockPort()),
+                 error = OT_ERROR_INVALID_ARGS);
 
     messageInfoLocal = aMessageInfo;
+
+    if (messageInfoLocal.GetPeerAddr().IsUnspecified())
+    {
+        VerifyOrExit(!GetPeerName().GetAddress().IsUnspecified(), error = OT_ERROR_INVALID_ARGS);
+
+        messageInfoLocal.SetPeerAddr(GetPeerName().GetAddress());
+    }
+
+    if (messageInfoLocal.mPeerPort == 0)
+    {
+        VerifyOrExit(GetPeerName().mPort != 0, error = OT_ERROR_INVALID_ARGS);
+        messageInfoLocal.mPeerPort = GetPeerName().mPort;
+    }
 
     if (messageInfoLocal.GetSockAddr().IsUnspecified())
     {
         messageInfoLocal.SetSockAddr(GetSockName().GetAddress());
     }
 
-    if (GetSockName().mPort == 0)
+    if (!IsBound())
     {
-        GetSockName().mPort = static_cast<Udp *>(mTransport)->GetEphemeralPort();
+        SuccessOrExit(error = Bind(GetSockName()));
     }
 
-    udpHeader.SetSourcePort(GetSockName().mPort);
-    udpHeader.SetDestinationPort(messageInfoLocal.mPeerPort);
-    udpHeader.SetLength(sizeof(udpHeader) + aMessage.GetLength());
-    udpHeader.SetChecksum(0);
+    messageInfoLocal.SetSockPort(GetSockName().mPort);
 
-    SuccessOrExit(error = aMessage.Prepend(&udpHeader, sizeof(udpHeader)));
-    aMessage.SetOffset(0);
-    SuccessOrExit(error = static_cast<Udp *>(mTransport)->SendDatagram(aMessage, messageInfoLocal, kProtoUdp));
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
+    if (!IsMle(GetInstance(), mSockName.mPort) &&
+        !(mSockName.mPort == ot::kCoapUdpPort && aMessage.GetSubType() == Message::kSubTypeJoinerEntrust))
+    {
+        SuccessOrExit(error = otPlatUdpSend(this, &aMessage, &messageInfoLocal));
+    }
+    else
+#endif
+    {
+        SuccessOrExit(error = Get<Udp>().SendDatagram(aMessage, messageInfoLocal, kProtoUdp));
+    }
 
 exit:
     return error;
 }
 
-Udp::Udp(Ip6 &aIp6):
-    mEphemeralPort(kDynamicPortMin),
-    mSockets(NULL),
-    mIp6(aIp6)
+Udp::Udp(Instance &aInstance)
+    : InstanceLocator(aInstance)
+    , mEphemeralPort(kDynamicPortMin)
+    , mReceivers(NULL)
+    , mSockets(NULL)
+#if OPENTHREAD_ENABLE_UDP_FORWARD
+    , mUdpForwarderContext(NULL)
+    , mUdpForwarder(NULL)
+#endif
 {
 }
 
-ThreadError Udp::AddSocket(UdpSocket &aSocket)
+otError Udp::AddReceiver(UdpReceiver &aReceiver)
+{
+    otError error = OT_ERROR_NONE;
+
+    for (UdpReceiver *cur = mReceivers; cur; cur = cur->GetNext())
+    {
+        if (cur == &aReceiver)
+        {
+            ExitNow(error = OT_ERROR_ALREADY);
+        }
+    }
+
+    aReceiver.SetNext(mReceivers);
+    mReceivers = &aReceiver;
+
+exit:
+    return error;
+}
+
+otError Udp::RemoveReceiver(UdpReceiver &aReceiver)
+{
+    otError error = OT_ERROR_NOT_FOUND;
+
+    if (mReceivers == &aReceiver)
+    {
+        mReceivers = mReceivers->GetNext();
+        aReceiver.SetNext(NULL);
+        error = OT_ERROR_NONE;
+    }
+    else
+    {
+        for (UdpReceiver *handler = mReceivers; handler; handler = handler->GetNext())
+        {
+            if (handler->GetNext() == &aReceiver)
+            {
+                handler->SetNext(aReceiver.GetNext());
+                aReceiver.SetNext(NULL);
+                error = OT_ERROR_NONE;
+                break;
+            }
+        }
+    }
+
+    return error;
+}
+
+void Udp::AddSocket(UdpSocket &aSocket)
 {
     for (UdpSocket *cur = mSockets; cur; cur = cur->GetNext())
     {
@@ -133,10 +273,10 @@ ThreadError Udp::AddSocket(UdpSocket &aSocket)
     mSockets = &aSocket;
 
 exit:
-    return kThreadError_None;
+    return;
 }
 
-ThreadError Udp::RemoveSocket(UdpSocket &aSocket)
+void Udp::RemoveSocket(UdpSocket &aSocket)
 {
     if (mSockets == &aSocket)
     {
@@ -155,8 +295,6 @@ ThreadError Udp::RemoveSocket(UdpSocket &aSocket)
     }
 
     aSocket.SetNext(NULL);
-
-    return kThreadError_None;
 }
 
 uint16_t Udp::GetEphemeralPort(void)
@@ -175,55 +313,96 @@ uint16_t Udp::GetEphemeralPort(void)
     return rval;
 }
 
-Message *Udp::NewMessage(uint16_t aReserved)
+Message *Udp::NewMessage(uint16_t aReserved, const otMessageSettings *aSettings)
 {
-    return mIp6.NewMessage(sizeof(UdpHeader) + aReserved);
+    return Get<Ip6>().NewMessage(sizeof(UdpHeader) + aReserved, aSettings);
 }
 
-ThreadError Udp::SendDatagram(Message &aMessage, MessageInfo &aMessageInfo, IpProto aIpProto)
+otError Udp::SendDatagram(Message &aMessage, MessageInfo &aMessageInfo, IpProto aIpProto)
 {
-    return mIp6.SendDatagram(aMessage, aMessageInfo, aIpProto);
+    otError error = OT_ERROR_NONE;
+
+#if OPENTHREAD_ENABLE_UDP_FORWARD
+    if (aMessageInfo.IsHostInterface())
+    {
+        VerifyOrExit(mUdpForwarder != NULL, error = OT_ERROR_NO_ROUTE);
+        mUdpForwarder(&aMessage, aMessageInfo.mPeerPort, &aMessageInfo.GetPeerAddr(), aMessageInfo.mSockPort,
+                      mUdpForwarderContext);
+        // message is consumed by the callback
+    }
+    else
+#endif
+    {
+        UdpHeader udpHeader;
+
+        udpHeader.SetSourcePort(aMessageInfo.mSockPort);
+        udpHeader.SetDestinationPort(aMessageInfo.mPeerPort);
+        udpHeader.SetLength(sizeof(udpHeader) + aMessage.GetLength());
+        udpHeader.SetChecksum(0);
+
+        SuccessOrExit(error = aMessage.Prepend(&udpHeader, sizeof(udpHeader)));
+        aMessage.SetOffset(0);
+
+        error = Get<Ip6>().SendDatagram(aMessage, aMessageInfo, aIpProto);
+    }
+
+exit:
+    return error;
 }
 
-ThreadError Udp::HandleMessage(Message &aMessage, MessageInfo &aMessageInfo)
+otError Udp::HandleMessage(Message &aMessage, MessageInfo &aMessageInfo)
 {
-    ThreadError error = kThreadError_None;
+    otError   error = OT_ERROR_NONE;
     UdpHeader udpHeader;
-    uint16_t payloadLength;
-    uint16_t checksum;
+    uint16_t  payloadLength;
+    uint16_t  checksum;
 
     payloadLength = aMessage.GetLength() - aMessage.GetOffset();
 
     // check length
-    VerifyOrExit(payloadLength >= sizeof(UdpHeader), error = kThreadError_Parse);
+    VerifyOrExit(payloadLength >= sizeof(UdpHeader), error = OT_ERROR_PARSE);
 
     // verify checksum
-    checksum = Ip6::ComputePseudoheaderChecksum(aMessageInfo.GetPeerAddr(), aMessageInfo.GetSockAddr(),
-                                                payloadLength, kProtoUdp);
+    checksum = Ip6::ComputePseudoheaderChecksum(aMessageInfo.GetPeerAddr(), aMessageInfo.GetSockAddr(), payloadLength,
+                                                kProtoUdp);
     checksum = aMessage.UpdateChecksum(checksum, aMessage.GetOffset(), payloadLength);
-    VerifyOrExit(checksum == 0xffff, ;);
 
-    VerifyOrExit(aMessage.Read(aMessage.GetOffset(), sizeof(udpHeader), &udpHeader) == sizeof(udpHeader),);
+#ifndef FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION
+    VerifyOrExit(checksum == 0xffff, error = OT_ERROR_DROP);
+#endif
+
+    VerifyOrExit(aMessage.Read(aMessage.GetOffset(), sizeof(udpHeader), &udpHeader) == sizeof(udpHeader),
+                 error = OT_ERROR_PARSE);
     aMessage.MoveOffset(sizeof(udpHeader));
     aMessageInfo.mPeerPort = udpHeader.GetSourcePort();
     aMessageInfo.mSockPort = udpHeader.GetDestinationPort();
 
+#if OPENTHREAD_ENABLE_PLATFORM_UDP
+    VerifyOrExit(IsMle(GetInstance(), aMessageInfo.mSockPort));
+#endif
+
+    for (UdpReceiver *receiver = mReceivers; receiver; receiver = receiver->GetNext())
+    {
+        VerifyOrExit(!receiver->HandleMessage(aMessage, aMessageInfo));
+    }
+
+    HandlePayload(aMessage, aMessageInfo);
+
+exit:
+    return error;
+}
+
+void Udp::HandlePayload(Message &aMessage, MessageInfo &aMessageInfo)
+{
     // find socket
     for (UdpSocket *socket = mSockets; socket; socket = socket->GetNext())
     {
-        if (socket->GetSockName().mPort != udpHeader.GetDestinationPort())
+        if (socket->GetSockName().mPort != aMessageInfo.GetSockPort())
         {
             continue;
         }
 
-        if (socket->GetSockName().mScopeId != 0 &&
-            socket->GetSockName().mScopeId != aMessageInfo.mInterfaceId)
-        {
-            continue;
-        }
-
-        if (!aMessageInfo.GetSockAddr().IsMulticast() &&
-            !socket->GetSockName().GetAddress().IsUnspecified() &&
+        if (!aMessageInfo.GetSockAddr().IsMulticast() && !socket->GetSockName().GetAddress().IsUnspecified() &&
             socket->GetSockName().GetAddress() != aMessageInfo.GetSockAddr())
         {
             continue;
@@ -232,7 +411,7 @@ ThreadError Udp::HandleMessage(Message &aMessage, MessageInfo &aMessageInfo)
         // verify source if connected socket
         if (socket->GetPeerName().mPort != 0)
         {
-            if (socket->GetPeerName().mPort != udpHeader.GetSourcePort())
+            if (socket->GetPeerName().mPort != aMessageInfo.GetPeerPort())
             {
                 continue;
             }
@@ -244,14 +423,14 @@ ThreadError Udp::HandleMessage(Message &aMessage, MessageInfo &aMessageInfo)
             }
         }
 
+        aMessage.RemoveHeader(aMessage.GetOffset());
+        assert(aMessage.GetOffset() == 0);
         socket->HandleUdpReceive(aMessage, aMessageInfo);
+        break;
     }
-
-exit:
-    return error;
 }
 
-ThreadError Udp::UpdateChecksum(Message &aMessage, uint16_t aChecksum)
+void Udp::UpdateChecksum(Message &aMessage, uint16_t aChecksum)
 {
     aChecksum = aMessage.UpdateChecksum(aChecksum, aMessage.GetOffset(), aMessage.GetLength() - aMessage.GetOffset());
 
@@ -262,8 +441,7 @@ ThreadError Udp::UpdateChecksum(Message &aMessage, uint16_t aChecksum)
 
     aChecksum = HostSwap16(aChecksum);
     aMessage.Write(aMessage.GetOffset() + UdpHeader::GetChecksumOffset(), sizeof(aChecksum), &aChecksum);
-    return kThreadError_None;
 }
 
-}  // namespace Ip6
-}  // namespace Thread
+} // namespace Ip6
+} // namespace ot

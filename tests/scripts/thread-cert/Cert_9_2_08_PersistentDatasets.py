@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -30,6 +30,7 @@
 import time
 import unittest
 
+import config
 import node
 
 COMMISSIONER = 1
@@ -45,11 +46,15 @@ LEADER_ACTIVE_TIMESTAMP = 10
 COMMISSIONER_PENDING_CHANNEL = 20
 COMMISSIONER_PENDING_PANID = 0xafce
 
-class Cert_9_2_8_DelayTimer(unittest.TestCase):
+MTDS = [ED, SED]
+
+class Cert_9_2_8_PersistentDatasets(unittest.TestCase):
     def setUp(self):
+        self.simulator = config.create_default_simulator()
+
         self.nodes = {}
         for i in range(1,6):
-            self.nodes[i] = node.Node(i)
+            self.nodes[i] = node.Node(i, (i in MTDS), simulator=self.simulator)
 
         self.nodes[COMMISSIONER].set_active_dataset(LEADER_ACTIVE_TIMESTAMP, panid=PANID_INIT, channel=CHANNEL_INIT)
         self.nodes[COMMISSIONER].set_mode('rsdn')
@@ -67,63 +72,74 @@ class Cert_9_2_8_DelayTimer(unittest.TestCase):
 
         self.nodes[ROUTER].set_active_dataset(LEADER_ACTIVE_TIMESTAMP, panid=PANID_INIT, channel=CHANNEL_INIT)
         self.nodes[ROUTER].set_mode('rsdn')
+        self._setUpRouter()
+
+        self.nodes[ED].set_channel(CHANNEL_INIT)
+        self.nodes[ED].set_panid(PANID_INIT)
+        self.nodes[ED].set_mode('rsn')
+        self._setUpEd()
+
+        self.nodes[SED].set_channel(CHANNEL_INIT)
+        self.nodes[SED].set_panid(PANID_INIT)
+        self.nodes[SED].set_mode('s')
+        self._setUpSed()
+
+    def _setUpRouter(self):
         self.nodes[ROUTER].add_whitelist(self.nodes[LEADER].get_addr64())
         self.nodes[ROUTER].enable_whitelist()
         self.nodes[ROUTER].set_router_selection_jitter(1)
 
-        self.nodes[ED].set_active_dataset(LEADER_ACTIVE_TIMESTAMP, panid=PANID_INIT, channel=CHANNEL_INIT)
-        self.nodes[ED].set_mode('rsn')
+    def _setUpEd(self):
         self.nodes[ED].add_whitelist(self.nodes[LEADER].get_addr64())
         self.nodes[ED].enable_whitelist()
-        self.nodes[ED].set_timeout(3)
+        self.nodes[ED].set_timeout(config.DEFAULT_CHILD_TIMEOUT)
 
-        self.nodes[SED].set_active_dataset(LEADER_ACTIVE_TIMESTAMP, panid=PANID_INIT, channel=CHANNEL_INIT)
-        self.nodes[SED].set_mode('s')
+    def _setUpSed(self):
         self.nodes[SED].add_whitelist(self.nodes[LEADER].get_addr64())
         self.nodes[SED].enable_whitelist()
-        self.nodes[SED].set_timeout(3)
+        self.nodes[SED].set_timeout(config.DEFAULT_CHILD_TIMEOUT)
 
     def tearDown(self):
         for node in list(self.nodes.values()):
             node.stop()
-        del self.nodes
+            node.destroy()
 
     def test(self):
         self.nodes[LEADER].start()
-        self.nodes[LEADER].set_state('leader')
+        self.simulator.go(5)
         self.assertEqual(self.nodes[LEADER].get_state(), 'leader')
 
         self.nodes[COMMISSIONER].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[COMMISSIONER].get_state(), 'router')
 
         self.nodes[ROUTER].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ROUTER].get_state(), 'router')
 
         self.nodes[ED].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ED].get_state(), 'child')
 
         self.nodes[SED].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[SED].get_state(), 'child')
 
         self.nodes[COMMISSIONER].commissioner_start()
-        time.sleep(3)
+        self.simulator.go(3)
 
         self.nodes[COMMISSIONER].send_mgmt_pending_set(pending_timestamp=10,
                                                        active_timestamp=70,
                                                        delay_timer=60000,
                                                        channel=COMMISSIONER_PENDING_CHANNEL,
                                                        panid=COMMISSIONER_PENDING_PANID)
-        time.sleep(5)
+        self.simulator.go(5)
 
-        self.nodes[ROUTER].stop()
-        self.nodes[ED].stop()
-        self.nodes[SED].stop()
+        self.nodes[ROUTER].reset()
+        self.nodes[ED].reset()
+        self.nodes[SED].reset()
 
-        time.sleep(60)
+        self.simulator.go(60)
 
         self.assertEqual(self.nodes[LEADER].get_panid(), COMMISSIONER_PENDING_PANID)
         self.assertEqual(self.nodes[COMMISSIONER].get_panid(), COMMISSIONER_PENDING_PANID)
@@ -131,8 +147,15 @@ class Cert_9_2_8_DelayTimer(unittest.TestCase):
         self.assertEqual(self.nodes[LEADER].get_channel(), COMMISSIONER_PENDING_CHANNEL)
         self.assertEqual(self.nodes[COMMISSIONER].get_channel(), COMMISSIONER_PENDING_CHANNEL)
         
+        # reset the devices here again to simulate the fact that the devices were disabled the entire time
+        self.nodes[ROUTER].reset()
+        self._setUpRouter()
         self.nodes[ROUTER].start()
+        self.nodes[ED].reset()
+        self._setUpEd()
         self.nodes[ED].start()
+        self.nodes[SED].reset()
+        self._setUpSed()
         self.nodes[SED].start()
 
         self.assertEqual(self.nodes[ROUTER].get_panid(), PANID_INIT)
@@ -143,7 +166,7 @@ class Cert_9_2_8_DelayTimer(unittest.TestCase):
         self.assertEqual(self.nodes[ED].get_channel(), CHANNEL_INIT)
         self.assertEqual(self.nodes[SED].get_channel(), CHANNEL_INIT)
 
-        time.sleep(5)
+        self.simulator.go(10)
 
         self.assertEqual(self.nodes[ROUTER].get_panid(), COMMISSIONER_PENDING_PANID)
         self.assertEqual(self.nodes[ED].get_panid(), COMMISSIONER_PENDING_PANID)
@@ -153,7 +176,7 @@ class Cert_9_2_8_DelayTimer(unittest.TestCase):
         self.assertEqual(self.nodes[ED].get_channel(), COMMISSIONER_PENDING_CHANNEL)
         self.assertEqual(self.nodes[SED].get_channel(), COMMISSIONER_PENDING_CHANNEL)
 
-        time.sleep(5)
+        self.simulator.go(5)
 
         ipaddrs = self.nodes[ROUTER].get_addrs()
         for ipaddr in ipaddrs:

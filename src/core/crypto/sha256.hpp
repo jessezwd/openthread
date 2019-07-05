@@ -34,11 +34,13 @@
 #ifndef SHA256_HPP_
 #define SHA256_HPP_
 
+#include "openthread-core-config.h"
+
 #include <stdint.h>
 
 #include <mbedtls/sha256.h>
 
-namespace Thread {
+namespace ot {
 namespace Crypto {
 
 /**
@@ -57,8 +59,20 @@ class Sha256
 public:
     enum
     {
-        kHashSize = 32,  ///< SHA-256 hash size (bytes)
+        kHashSize = 32, ///< SHA-256 hash size (bytes)
     };
+
+    /**
+     * Constructor for initializing mbedtls_sha256_context.
+     *
+     */
+    Sha256();
+
+    /**
+     * Destructor for freeing mbedtls_sha256_context.
+     *
+     */
+    ~Sha256();
 
     /**
      * This method starts the SHA-256 computation.
@@ -92,7 +106,7 @@ private:
  *
  */
 
-}  // namespace Crypto
-}  // namespace Thread
+} // namespace Crypto
+} // namespace ot
 
-#endif  // SHA256_HPP_
+#endif // SHA256_HPP_

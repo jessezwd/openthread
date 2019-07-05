@@ -37,41 +37,56 @@ libmbedcrypto_a_CPPFLAGS                      = \
     -I$(top_srcdir)/include                     \
     -I$(top_srcdir)/src/core                    \
     -I$(MBEDTLS_SRCDIR)/include                 \
-    -I$(MBEDTLS_SRCDIR)/include/mbedtls         \
-    -DMBEDTLS_CONFIG_FILE=\"mbedtls-config.h\"  \
+    $(MBEDTLS_CPPFLAGS)                         \
     $(NULL)
 
 libmbedcrypto_a_SOURCES                       = \
-    hardware_entropy.c                          \
     repo/library/aes.c                          \
-    repo/library/md.c                           \
-    repo/library/md_wrap.c                      \
-    repo/library/memory_buffer_alloc.c          \
-    repo/library/platform.c                     \
-    repo/library/sha256.c                       \
-    $(NULL)
-
-if OPENTHREAD_ENABLE_DTLS
-libmbedcrypto_a_SOURCES                      += \
+    repo/library/asn1parse.c                    \
+    repo/library/asn1write.c                    \
+    repo/library/base64.c                       \
     repo/library/bignum.c                       \
     repo/library/ccm.c                          \
     repo/library/cipher.c                       \
     repo/library/cipher_wrap.c                  \
+    repo/library/cmac.c                         \
     repo/library/ctr_drbg.c                     \
     repo/library/debug.c                        \
+    repo/library/ecdh.c                         \
+    repo/library/ecdsa.c                        \
     repo/library/ecjpake.c                      \
-    repo/library/ecp.c                          \
     repo/library/ecp_curves.c                   \
     repo/library/entropy.c                      \
     repo/library/entropy_poll.c                 \
+    repo/library/md.c                           \
+    repo/library/md_wrap.c                      \
+    repo/library/memory_buffer_alloc.c          \
+    repo/library/oid.c                          \
+    repo/library/pem.c                          \
+    repo/library/pk.c                           \
+    repo/library/pk_wrap.c                      \
+    repo/library/pkparse.c                      \
+    repo/library/platform.c                     \
+    repo/library/platform_util.c                \
+    repo/library/sha256.c                       \
     repo/library/ssl_cookie.c                   \
     repo/library/ssl_ciphersuites.c             \
     repo/library/ssl_cli.c                      \
     repo/library/ssl_srv.c                      \
     repo/library/ssl_ticket.c                   \
     repo/library/ssl_tls.c                      \
+    repo/library/threading.c                    \
+    repo/library/x509.c                         \
+    repo/library/x509_crt.c                     \
     $(NULL)
-endif  # OPENTHREAD_ENABLE_DTLS
+
+if !OPENTHREAD_EXAMPLES_EFR32MG12
+if !OPENTHREAD_EXAMPLES_EFR32MG21
+libmbedcrypto_a_SOURCES                      += \
+    repo/library/ecp.c                          \
+    $(NULL)
+endif
+endif
 
 if OPENTHREAD_BUILD_COVERAGE
 Dash                                          = -

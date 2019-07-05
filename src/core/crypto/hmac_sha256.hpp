@@ -34,11 +34,13 @@
 #ifndef HMAC_SHA256_HPP_
 #define HMAC_SHA256_HPP_
 
+#include "openthread-core-config.h"
+
 #include <stdint.h>
 
 #include <mbedtls/md.h>
 
-namespace Thread {
+namespace ot {
 namespace Crypto {
 
 /**
@@ -57,8 +59,20 @@ class HmacSha256
 public:
     enum
     {
-        kHashSize = 32,  ///< SHA-256 hash size (bytes)
+        kHashSize = 32, ///< SHA-256 hash size (bytes)
     };
+
+    /**
+     * Constructor for initialization of mbedtls_md_context_t.
+     *
+     */
+    HmacSha256();
+
+    /**
+     * Destructor for freeing of mbedtls_md_context_t.
+     *
+     */
+    ~HmacSha256();
 
     /**
      * This method sets the key.
@@ -95,7 +109,7 @@ private:
  *
  */
 
-}  // namespace Crypto
-}  // namespace Thread
+} // namespace Crypto
+} // namespace ot
 
-#endif  // HMAC_SHA256_HPP_
+#endif // HMAC_SHA256_HPP_

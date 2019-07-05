@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -33,6 +33,7 @@ import struct
 
 from binascii import hexlify
 from enum import IntEnum
+from tlvs_parsing import SubTlvsFactory
 
 import common
 
@@ -57,16 +58,7 @@ class NetworkData(object):
         return self._stable
 
 
-class SubTlvsFactory(object):
-
-    def __init__(self, sub_tlvs_factories):
-        self._sub_tlvs_factories = sub_tlvs_factories
-
-    def _get_factory(self, _type):
-        try:
-            return self._sub_tlvs_factories[_type]
-        except KeyError:
-            raise RuntimeError("Could not find factory. Factory type = {}.".format(_type))
+class NetworkDataSubTlvsFactory(SubTlvsFactory):
 
     def parse(self, data, message_info):
         sub_tlvs = []
@@ -210,7 +202,7 @@ class Prefix(NetworkData):
             self.stable, self.domain_id, self.prefix_length, hexlify(self.prefix), sub_tlvs_str)
 
 
-class PrefixSubTlvsFactory(SubTlvsFactory):
+class PrefixSubTlvsFactory(NetworkDataSubTlvsFactory):
 
     def __init__(self, sub_tlvs_factories):
         super(PrefixSubTlvsFactory, self).__init__(sub_tlvs_factories)
@@ -369,19 +361,42 @@ class LowpanIdFactory(object):
         return LowpanId(c, cid, context_length, message_info.stable)
 
 
-class CommissioningData(object):
+class CommissioningData(NetworkData):
 
-    def __init__(self):
-        # TODO: Not implemented yet
-        raise NotImplementedError
+    def __init__(self, sub_tlvs, stable):
+        super(CommissioningData, self).__init__(stable)
+        self._sub_tlvs = sub_tlvs
+
+    @property
+    def sub_tlvs(self):
+        return self._sub_tlvs
+
+    def __eq__(self, other):
+        common.expect_the_same_class(self, other)
+
+        return  self.sub_tlvs == other.sub_tlvs
+
+    def __repr__(self):
+        sub_tlvs_str = ", ".format(["{}".format(tlv) for tlv in self._sub_tlvs])
+        return "CommissioningData(stable={}, sub_tlvs=[{}])".format(
+            self._stable, sub_tlvs_str)
+
+
+class CommissioningDataSubTlvsFactory(SubTlvsFactory):
+
+    def __init__(self, sub_tlvs_factories):
+        super(CommissioningDataSubTlvsFactory, self).__init__(sub_tlvs_factories)
 
 
 class CommissioningDataFactory(object):
 
-    def __init__(self):
-        # TODO: Not implemented yet
-        raise NotImplementedError
+    def __init__(self, sub_tlvs_factory):
+        self._sub_tlvs_factory = sub_tlvs_factory
 
+    def parse(self, data, message_info):
+        sub_tlvs = self._sub_tlvs_factory.parse(io.BytesIO(data.read()), message_info)
+
+        return CommissioningData(sub_tlvs, message_info.stable)
 
 class Service(NetworkData):
 
@@ -434,7 +449,7 @@ class Service(NetworkData):
             self.stable, self.t, self.id, self.enterprise_number, self.service_data_length, self.service_data, sub_tlvs_str)
 
 
-class ServiceSubTlvsFactory(SubTlvsFactory):
+class ServiceSubTlvsFactory(NetworkDataSubTlvsFactory):
 
     def __init__(self, sub_tlvs_factories):
         super(ServiceSubTlvsFactory, self).__init__(sub_tlvs_factories)
@@ -494,7 +509,7 @@ class ServerFactory(object):
         return Server(server_16, server_data, message_info.stable)
 
 
-class NetworkDataTlvsFactory(SubTlvsFactory):
+class NetworkDataTlvsFactory(NetworkDataSubTlvsFactory):
 
     def __init__(self, sub_tlvs_factories):
         super(NetworkDataTlvsFactory, self).__init__(sub_tlvs_factories)

@@ -34,18 +34,21 @@
 #ifndef CLI_CONSOLE_HPP_
 #define CLI_CONSOLE_HPP_
 
-#include <openthread-types.h>
-#include <cli/cli_server.hpp>
-#include <cli/cli-console.h>
+#include "openthread-core-config.h"
 
-namespace Thread {
+#include <openthread/cli.h>
+
+#include "cli/cli.hpp"
+#include "cli/cli_server.hpp"
+
+namespace ot {
 namespace Cli {
 
 /**
  * This class implements the CLI server on top of the CONSOLE platform abstraction.
  *
  */
-class Console: public Server
+class Console : public Server
 {
 public:
     /**
@@ -54,7 +57,7 @@ public:
      * @param[in]  aInstance  The OpenThread instance structure.
      *
      */
-    Console(otInstance *aInstance);
+    explicit Console(Instance *aInstance);
 
     /**
      * This method delivers raw characters to the client.
@@ -65,18 +68,7 @@ public:
      * @returns The number of bytes placed in the output queue.
      *
      */
-    int Output(const char *aBuf, uint16_t aBufLength);
-
-    /**
-     * This method delivers formatted output to the client.
-     *
-     * @param[in]  aFmt  A pointer to the format string.
-     * @param[in]  ...   A variable list of arguments to format.
-     *
-     * @returns The number of bytes placed in the output queue.
-     *
-     */
-    int OutputFormat(const char *fmt, ...);
+    virtual int Output(const char *aBuf, uint16_t aBufLength);
 
     /**
      * This method sets a callback that is called when console has some output.
@@ -97,19 +89,11 @@ public:
     void ReceiveTask(char *aBuf, uint16_t aBufLength);
 
 private:
-    enum
-    {
-        kMaxLineLength = 128,
-    };
-
     otCliConsoleOutputCallback mCallback;
-    void *mContext;
-
-    Interpreter mInterpreter;
-
+    void *                     mContext;
 };
 
-}  // namespace Cli
-}  // namespace Thread
+} // namespace Cli
+} // namespace ot
 
-#endif  // CLI_CONSOLE_HPP_
+#endif // CLI_CONSOLE_HPP_

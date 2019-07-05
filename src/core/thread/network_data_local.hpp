@@ -26,8 +26,170 @@
  *  POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifdef OPENTHREAD_MTD
-#include "network_data_local_mtd.hpp"
-#else
-#include "network_data_local_ftd.hpp"
+/**
+ * @file
+ *   This file includes definitions for manipulating local Thread Network Data.
+ */
+
+#ifndef NETWORK_DATA_LOCAL_HPP_
+#define NETWORK_DATA_LOCAL_HPP_
+
+#include "openthread-core-config.h"
+
+#include "thread/network_data.hpp"
+
+namespace ot {
+
+/**
+ * @addtogroup core-netdata-local
+ *
+ * @brief
+ *   This module includes definitions for manipulating local Thread Network Data.
+ *
+ * @{
+ */
+
+namespace NetworkData {
+
+/**
+ * This class implements the Thread Network Data contributed by the local device.
+ *
+ */
+class Local : public NetworkData
+{
+public:
+    /**
+     * This constructor initializes the local Network Data.
+     *
+     * @param[in]  aNetif  A reference to the Thread network interface.
+     *
+     */
+    explicit Local(Instance &aInstance);
+
+    /**
+     * This method adds a Border Router entry to the Thread Network Data.
+     *
+     * @param[in]  aPrefix        A pointer to the prefix.
+     * @param[in]  aPrefixLength  The length of @p aPrefix in bytes.
+     * @param[in]  aPrf           The preference value.
+     * @param[in]  aFlags         The Border Router Flags value.
+     * @param[in]  aStable        The Stable value.
+     *
+     * @retval OT_ERROR_NONE         Successfully added the Border Router entry.
+     * @retval OT_ERROR_NO_BUFS      Insufficient space to add the Border Router entry.
+     * @retval OT_ERROR_INVALID_ARGS The prefix is mesh local prefix.
+     *
+     */
+    otError AddOnMeshPrefix(const uint8_t *aPrefix, uint8_t aPrefixLength, int8_t aPrf, uint8_t aFlags, bool aStable);
+
+    /**
+     * This method removes a Border Router entry from the Thread Network Data.
+     *
+     * @param[in]  aPrefix        A pointer to the prefix.
+     * @param[in]  aPrefixLength  The length of @p aPrefix in bytes.
+     *
+     * @retval OT_ERROR_NONE       Successfully removed the Border Router entry.
+     * @retval OT_ERROR_NOT_FOUND  Could not find the Border Router entry.
+     *
+     */
+    otError RemoveOnMeshPrefix(const uint8_t *aPrefix, uint8_t aPrefixLength);
+
+    /**
+     * This method adds a Has Route entry to the Thread Network data.
+     *
+     * @param[in]  aPrefix        A pointer to the prefix.
+     * @param[in]  aPrefixLength  The length of @p aPrefix in bytes.
+     * @param[in]  aPrf           The preference value.
+     * @param[in]  aStable        The Stable value.
+     *
+     * @retval OT_ERROR_NONE     Successfully added the Has Route entry.
+     * @retval OT_ERROR_NO_BUFS  Insufficient space to add the Has Route entry.
+     *
+     */
+    otError AddHasRoutePrefix(const uint8_t *aPrefix, uint8_t aPrefixLength, int8_t aPrf, bool aStable);
+
+    /**
+     * This method removes a Border Router entry from the Thread Network Data.
+     *
+     * @param[in]  aPrefix        A pointer to the prefix.
+     * @param[in]  aPrefixLength  The length of @p aPrefix in bytes.
+     *
+     * @retval OT_ERROR_NONE       Successfully removed the Border Router entry.
+     * @retval OT_ERROR_NOT_FOUND  Could not find the Border Router entry.
+     *
+     */
+    otError RemoveHasRoutePrefix(const uint8_t *aPrefix, uint8_t aPrefixLength);
+
+#if OPENTHREAD_ENABLE_SERVICE
+    /**
+     * This method adds a Service entry to the Thread Network local data.
+     *
+     * @param[in]  aEnterpriseNumber  Enterprise Number (IANA-assigned) for Service TLV
+     * @param[in]  aServiceData       A pointer to the Service Data
+     * @param[in]  aServiceDataLength The length of @p aServiceData in bytes.
+     * @param[in]  aServerStable      The Stable flag value for Server TLV
+     * @param[in]  aServerData        A pointer to the Server Data
+     * @param[in]  aServerDataLength  The length of @p aServerData in bytes.
+     *
+     * @retval OT_ERROR_NONE     Successfully added the Service entry.
+     * @retval OT_ERROR_NO_BUFS  Insufficient space to add the Service entry.
+     *
+     */
+    otError AddService(uint32_t       aEnterpriseNumber,
+                       const uint8_t *aServiceData,
+                       uint8_t        aServiceDataLength,
+                       bool           aServerStable,
+                       const uint8_t *aServerData,
+                       uint8_t        aServerDataLength);
+
+    /**
+     * This method removes a Service entry from the Thread Network local data.
+     *
+     * @param[in]  aEnterpriseNumber   Enterprise Number of the service to be deleted.
+     * @param[in]  aServiceData        A pointer to the service data.
+     * @param[in]  aServiceDataLength  The length of @p aServiceData in bytes.
+     *
+     * @retval OT_ERROR_NONE       Successfully removed the Border Router entry.
+     * @retval OT_ERROR_NOT_FOUND  Could not find the Border Router entry.
+     *
+     */
+    otError RemoveService(uint32_t aEnterpriseNumber, const uint8_t *aServiceData, uint8_t aServiceDataLength);
 #endif
+
+    /**
+     * This method sends a Server Data Notification message to the Leader.
+     *
+     * @retval OT_ERROR_NONE     Successfully enqueued the notification message.
+     * @retval OT_ERROR_NO_BUFS  Insufficient message buffers to generate the notification message.
+     *
+     */
+    otError SendServerDataNotification(void);
+
+private:
+    void UpdateRloc(void);
+    void UpdateRloc(PrefixTlv &aPrefix);
+    void UpdateRloc(HasRouteTlv &aHasRoute);
+    void UpdateRloc(BorderRouterTlv &aBorderRouter);
+#if OPENTHREAD_ENABLE_SERVICE
+    void UpdateRloc(ServiceTlv &aService);
+    void UpdateRloc(ServerTlv &aServer);
+#endif
+
+    bool IsOnMeshPrefixConsistent(void);
+    bool IsExternalRouteConsistent(void);
+#if OPENTHREAD_ENABLE_SERVICE
+    bool IsServiceConsistent(void);
+#endif
+
+    uint16_t mOldRloc;
+};
+
+} // namespace NetworkData
+
+/**
+ * @}
+ */
+
+} // namespace ot
+
+#endif // NETWORK_DATA_LOCAL_HPP_

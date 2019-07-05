@@ -31,40 +31,41 @@
  *   This file implements the CLI server on the CONSOLE service.
  */
 
+#include "cli_console.hpp"
+
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
+#include "utils/wrap_string.h"
 
-#include <cli/cli.hpp>
-#include <cli/cli_console.hpp>
-#include <common/new.hpp>
+#include "cli/cli.hpp"
+#include "common/instance.hpp"
+#include "common/new.hpp"
 
-namespace Thread {
+namespace ot {
 namespace Cli {
-
-static Console *sServer;
 
 static otDEFINE_ALIGNED_VAR(sCliConsoleRaw, sizeof(Console), uint64_t);
 
 extern "C" void otCliConsoleInit(otInstance *aInstance, otCliConsoleOutputCallback aCallback, void *aContext)
 {
-    sServer = new(&sCliConsoleRaw) Console(aInstance);
-    sServer->SetOutputCallback(aCallback);
-    sServer->SetContext(aContext);
+    Instance *instance = static_cast<Instance *>(aInstance);
+
+    Server::sServer = new (&sCliConsoleRaw) Console(instance);
+    static_cast<Console *>(Server::sServer)->SetOutputCallback(aCallback);
+    static_cast<Console *>(Server::sServer)->SetContext(aContext);
 }
 
 extern "C" void otCliConsoleInputLine(char *aBuf, uint16_t aBufLength)
 {
-    sServer->ReceiveTask(aBuf, aBufLength);
+    static_cast<Console *>(Server::sServer)->ReceiveTask(aBuf, aBufLength);
 }
 
-Console::Console(otInstance *aInstance):
-    mCallback(NULL),
-    mContext(NULL),
-    mInterpreter(aInstance)
+Console::Console(Instance *aInstance)
+    : Server(aInstance)
+    , mCallback(NULL)
+    , mContext(NULL)
 {
-
 }
 
 void Console::SetContext(void *aContext)
@@ -87,17 +88,5 @@ int Console::Output(const char *aBuf, uint16_t aBufLength)
     return mCallback(aBuf, aBufLength, mContext);
 }
 
-int Console::OutputFormat(const char *fmt, ...)
-{
-    char buf[kMaxLineLength];
-    va_list ap;
-
-    va_start(ap, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, ap);
-    va_end(ap);
-
-    return Output(buf, static_cast<uint16_t>(strlen(buf)));
-}
-
-}  // namespace Cli
-}  // namespace Thread
+} // namespace Cli
+} // namespace ot

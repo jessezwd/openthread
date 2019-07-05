@@ -34,15 +34,18 @@
 #ifndef OPENTHREAD_CORE_CONFIG_H_
 #define OPENTHREAD_CORE_CONFIG_H_
 
+#include <openthread/config.h>
+
 #define OPENTHREAD_CORE_CONFIG_H_IN
 
 #ifdef OPENTHREAD_PROJECT_CORE_CONFIG_FILE
 #include OPENTHREAD_PROJECT_CORE_CONFIG_FILE
 #endif
 
-#include <openthread-core-default-config.h>
+#include "openthread-core-default-config.h"
 
 #undef OPENTHREAD_CORE_CONFIG_H_IN
 
-#endif  // OPENTHREAD_CORE_CONFIG_H_
+#include "openthread-core-config-check.h"
 
+#endif // OPENTHREAD_CORE_CONFIG_H_

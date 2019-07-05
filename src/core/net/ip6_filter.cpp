@@ -31,30 +31,34 @@
  *   This file implements IPv6 datagram filtering.
  */
 
+#include "ip6_filter.hpp"
+
 #include <stdio.h>
 
-#include <common/code_utils.hpp>
-#include <net/ip6.hpp>
-#include <net/ip6_filter.hpp>
-#include <net/udp6.hpp>
-#include <net/tcp.hpp>
-#include <thread/mle.hpp>
+#include "common/code_utils.hpp"
+#include "common/instance.hpp"
+#include "meshcop/meshcop.hpp"
+#include "net/ip6.hpp"
+#include "net/tcp.hpp"
+#include "net/udp6.hpp"
+#include "thread/mle.hpp"
 
-namespace Thread {
+namespace ot {
 namespace Ip6 {
 
 Filter::Filter(void)
+    : mAllowNativeCommissioner(true)
 {
     memset(mUnsecurePorts, 0, sizeof(mUnsecurePorts));
 }
 
 bool Filter::Accept(Message &aMessage) const
 {
-    bool rval = false;
-    Header ip6;
+    bool      rval = false;
+    Header    ip6;
     UdpHeader udp;
     TcpHeader tcp;
-    uint16_t dstport;
+    uint16_t  dstport;
 
     // Allow all received IPv6 datagrams with link security enabled
     if (aMessage.IsLinkSecurityEnabled())
@@ -63,16 +67,16 @@ bool Filter::Accept(Message &aMessage) const
     }
 
     // Read IPv6 header
-    VerifyOrExit(sizeof(ip6) == aMessage.Read(0, sizeof(ip6), &ip6), ;);
+    VerifyOrExit(sizeof(ip6) == aMessage.Read(0, sizeof(ip6), &ip6));
 
     // Allow only link-local unicast or multicast
-    VerifyOrExit(ip6.GetDestination().IsLinkLocal() || ip6.GetDestination().IsLinkLocalMulticast(), ;);
+    VerifyOrExit(ip6.GetDestination().IsLinkLocal() || ip6.GetDestination().IsLinkLocalMulticast());
 
     switch (ip6.GetNextHeader())
     {
     case kProtoUdp:
         // Read the UDP header and get the dst port
-        VerifyOrExit(sizeof(udp) == aMessage.Read(sizeof(ip6), sizeof(udp), &udp), ;);
+        VerifyOrExit(sizeof(udp) == aMessage.Read(sizeof(ip6), sizeof(udp), &udp));
 
         dstport = udp.GetDestinationPort();
 
@@ -82,11 +86,16 @@ bool Filter::Accept(Message &aMessage) const
             ExitNow(rval = true);
         }
 
+        // Allow native commissioner traffic
+        if (mAllowNativeCommissioner && dstport == MeshCoP::kBorderAgentUdpPort)
+        {
+            ExitNow(rval = true);
+        }
         break;
 
     case kProtoTcp:
         // Read the TCP header and get the dst port
-        VerifyOrExit(sizeof(tcp) == aMessage.Read(sizeof(ip6), sizeof(tcp), &tcp), ;);
+        VerifyOrExit(sizeof(tcp) == aMessage.Read(sizeof(ip6), sizeof(tcp), &tcp));
 
         dstport = tcp.GetDestinationPort();
 
@@ -110,9 +119,9 @@ exit:
     return rval;
 }
 
-ThreadError Filter::AddUnsecurePort(uint16_t aPort)
+otError Filter::AddUnsecurePort(uint16_t aPort)
 {
-    ThreadError error = kThreadError_None;
+    otError error = OT_ERROR_NONE;
 
     for (int i = 0; i < kMaxUnsecurePorts; i++)
     {
@@ -131,15 +140,15 @@ ThreadError Filter::AddUnsecurePort(uint16_t aPort)
         }
     }
 
-    ExitNow(error = kThreadError_NoBufs);
+    ExitNow(error = OT_ERROR_NO_BUFS);
 
 exit:
     return error;
 }
 
-ThreadError Filter::RemoveUnsecurePort(uint16_t aPort)
+otError Filter::RemoveUnsecurePort(uint16_t aPort)
 {
-    ThreadError error = kThreadError_None;
+    otError error = OT_ERROR_NONE;
 
     for (int i = 0; i < kMaxUnsecurePorts; i++)
     {
@@ -158,10 +167,15 @@ ThreadError Filter::RemoveUnsecurePort(uint16_t aPort)
         }
     }
 
-    ExitNow(error = kThreadError_NotFound);
+    ExitNow(error = OT_ERROR_NOT_FOUND);
 
 exit:
     return error;
+}
+
+void Filter::RemoveAllUnsecurePorts(void)
+{
+    memset(mUnsecurePorts, 0, sizeof(mUnsecurePorts));
 }
 
 const uint16_t *Filter::GetUnsecurePorts(uint8_t &aNumEntries) const
@@ -178,5 +192,5 @@ const uint16_t *Filter::GetUnsecurePorts(uint8_t &aNumEntries) const
     return mUnsecurePorts;
 }
 
-}  // namespace Ip6
-}  // namespace Thread
+} // namespace Ip6
+} // namespace ot

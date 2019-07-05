@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -30,6 +30,7 @@
 import time
 import unittest
 
+import config
 import node
 
 LEADER = 1
@@ -37,9 +38,11 @@ ED = 2
 
 class Cert_6_5_2_ChildResetReattach(unittest.TestCase):
     def setUp(self):
+        self.simulator = config.create_default_simulator()
+
         self.nodes = {}
         for i in range(1,3):
-            self.nodes[i] = node.Node(i)
+            self.nodes[i] = node.Node(i, (i == ED), simulator=self.simulator)
 
         self.nodes[LEADER].set_panid(0xface)
         self.nodes[LEADER].set_mode('rsdn')
@@ -48,34 +51,38 @@ class Cert_6_5_2_ChildResetReattach(unittest.TestCase):
 
         self.nodes[ED].set_panid(0xface)
         self.nodes[ED].set_mode('rsn')
+        self._setUpEd()
+
+    def _setUpEd(self):
         self.nodes[ED].add_whitelist(self.nodes[LEADER].get_addr64())
         self.nodes[ED].enable_whitelist()
 
     def tearDown(self):
         for node in list(self.nodes.values()):
             node.stop()
-        del self.nodes
+            node.destroy()
+        self.simulator.stop()
 
     def test(self):
         self.nodes[LEADER].start()
-        self.nodes[LEADER].set_state('leader')
+        self.simulator.go(5)
         self.assertEqual(self.nodes[LEADER].get_state(), 'leader')
 
         self.nodes[ED].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ED].get_state(), 'child')
 
         self.nodes[LEADER].remove_whitelist(self.nodes[ED].get_addr64())
         self.nodes[ED].remove_whitelist(self.nodes[LEADER].get_addr64())
 
-        self.nodes[ED].stop()
-        time.sleep(5)
+        self.nodes[ED].reset()
+        self._setUpEd()
+        self.simulator.go(5)
         self.nodes[ED].start()
 
-        time.sleep(5)
+        self.simulator.go(5)
         self.nodes[LEADER].add_whitelist(self.nodes[ED].get_addr64())
-        self.nodes[ED].add_whitelist(self.nodes[LEADER].get_addr64())
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ED].get_state(), 'child')
 
         addrs = self.nodes[ED].get_addrs()

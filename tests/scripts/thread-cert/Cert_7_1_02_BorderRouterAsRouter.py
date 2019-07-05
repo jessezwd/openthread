@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #
 #  Copyright (c) 2016, The OpenThread Authors.
 #  All rights reserved.
@@ -30,6 +30,7 @@
 import time
 import unittest
 
+import config
 import node
 
 LEADER = 1
@@ -37,11 +38,15 @@ ROUTER = 2
 ED2 = 3
 SED2 = 4
 
+MTDS = [ED2, SED2]
+
 class Cert_7_1_2_BorderRouterAsRouter(unittest.TestCase):
     def setUp(self):
+        self.simulator = config.create_default_simulator()
+
         self.nodes = {}
         for i in range(1,5):
-            self.nodes[i] = node.Node(i)
+            self.nodes[i] = node.Node(i, (i in MTDS), simulator=self.simulator)
 
         self.nodes[LEADER].set_panid(0xface)
         self.nodes[LEADER].set_mode('rsdn')
@@ -65,32 +70,37 @@ class Cert_7_1_2_BorderRouterAsRouter(unittest.TestCase):
         self.nodes[SED2].set_mode('s')
         self.nodes[SED2].add_whitelist(self.nodes[ROUTER].get_addr64())
         self.nodes[SED2].enable_whitelist()
-        self.nodes[SED2].set_timeout(3)
+        self.nodes[SED2].set_timeout(config.DEFAULT_CHILD_TIMEOUT)
 
     def tearDown(self):
         for node in list(self.nodes.values()):
             node.stop()
-        del self.nodes
+            node.destroy()
+        self.simulator.stop()
 
     def test(self):
         self.nodes[LEADER].start()
-        self.nodes[LEADER].set_state('leader')
+        self.simulator.go(5)
         self.assertEqual(self.nodes[LEADER].get_state(), 'leader')
 
         self.nodes[ROUTER].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ROUTER].get_state(), 'router')
 
         self.nodes[ROUTER].add_prefix('2001:2:0:1::/64', 'paros')
         self.nodes[ROUTER].add_prefix('2001:2:0:2::/64', 'paro')
         self.nodes[ROUTER].register_netdata()
 
+        # Set lowpan context of sniffer
+        self.simulator.set_lowpan_context(1, '2001:2:0:1::/64')
+        self.simulator.set_lowpan_context(2, '2001:2:0:2::/64')
+
         self.nodes[ED2].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[ED2].get_state(), 'child')
 
         self.nodes[SED2].start()
-        time.sleep(5)
+        self.simulator.go(5)
         self.assertEqual(self.nodes[SED2].get_state(), 'child')
 
         addrs = self.nodes[ED2].get_addrs()

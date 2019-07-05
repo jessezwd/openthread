@@ -34,17 +34,17 @@
 #ifndef NETWORK_DATA_LEADER_FTD_HPP_
 #define NETWORK_DATA_LEADER_FTD_HPP_
 
+#include "openthread-core-config.h"
+
 #include <stdint.h>
 
-#include <coap/coap_server.hpp>
-#include <common/timer.hpp>
-#include <net/ip6_address.hpp>
-#include <thread/mle_router.hpp>
-#include <thread/network_data.hpp>
+#include "coap/coap.hpp"
+#include "common/timer.hpp"
+#include "net/ip6_address.hpp"
+#include "thread/mle_router.hpp"
+#include "thread/network_data.hpp"
 
-namespace Thread {
-
-class ThreadNetif;
+namespace ot {
 
 namespace NetworkData {
 
@@ -62,16 +62,26 @@ namespace NetworkData {
  * This class implements the Thread Network Data maintained by the Leader.
  *
  */
-class Leader: public LeaderBase
+class Leader : public LeaderBase
 {
 public:
     /**
-     * This constructor initializes the object.
-     *
-     * @param[in]  aThreadNetif  A reference to the Thread network interface.
+     * This enumeration defines the match mode constants to compare two RLOC16 values.
      *
      */
-    explicit Leader(ThreadNetif &aThreadNetif);
+    enum MatchMode
+    {
+        kMatchModeRloc16,   ///< Perform exact RLOC16 match.
+        kMatchModeRouterId, ///< Perform Router ID match (match the router and any of its children).
+    };
+
+    /**
+     * This constructor initializes the object.
+     *
+     * @param[in]  aInstance     A reference to the OpenThread instance.
+     *
+     */
+    explicit Leader(Instance &aInstance);
 
     /**
      * This method reset the Thread Network Data.
@@ -119,103 +129,137 @@ public:
      * @param[in]  aDelay  The CONTEXT_ID_REUSE_DELAY value.
      *
      */
-    ThreadError SetContextIdReuseDelay(uint32_t aDelay);
+    void SetContextIdReuseDelay(uint32_t aDelay);
 
     /**
-     * This method removes Network Data associated with a given RLOC16.
+     * This method removes Network Data entries matching with a given RLOC16.
      *
-     * @param[in]  aRloc16  A RLOC16 value.
+     * @param[in]  aRloc16    A RLOC16 value.
+     * @param[in]  aMatchMode A match mode (@sa MatchMode).
      *
      */
-    void RemoveBorderRouter(uint16_t aRloc16);
+    void RemoveBorderRouter(uint16_t aRloc16, MatchMode aMatchMode);
 
     /**
      * This method sends a Server Data Notification message to the Leader indicating an invalid RLOC16.
      *
      * @param[in]  aRloc16  The invalid RLOC16 to notify.
      *
-     * @retval kThreadError_None    Successfully enqueued the notification message.
-     * @retval kThreadError_NoBufs  Insufficient message buffers to generate the notification message.
+     * @retval OT_ERROR_NONE     Successfully enqueued the notification message.
+     * @retval OT_ERROR_NO_BUFS  Insufficient message buffers to generate the notification message.
      *
      */
-    ThreadError SendServerDataNotification(uint16_t aRloc16);
+    otError SendServerDataNotification(uint16_t aRloc16);
+
+    /**
+     * This method synchronizes internal 6LoWPAN Context ID Set with recently obtained Thread Network Data.
+     *
+     * Note that this method should be called only by the Leader once after reset.
+     *
+     */
+    void UpdateContextsAfterReset(void);
+
+#if OPENTHREAD_ENABLE_SERVICE
+    /**
+     * This method scans network data for given service ID and returns pointer to the respective TLV, if present.
+     *
+     * @param aServiceId Service ID to look for.
+     * @return Pointer to the Service TLV for given Service ID, or NULL if not present.
+     *
+     */
+    ServiceTlv *FindServiceById(uint8_t aServiceId);
+#endif
 
 private:
-    static void HandleServerData(void *aContext, otCoapHeader *aHeader, otMessage aMessage,
-                                 const otMessageInfo *aMessageInfo);
-    void HandleServerData(Coap::Header &aHeader, Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
-    void SendServerDataResponse(const Coap::Header &aRequestHeader, const Ip6::MessageInfo &aMessageInfo,
-                                const uint8_t *aTlvs, uint8_t aTlvsLength);
+    static void HandleServerData(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
+    void        HandleServerData(Coap::Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
 
-    static void HandleTimer(void *aContext);
-    void HandleTimer(void);
+    static void HandleTimer(Timer &aTimer);
+    void        HandleTimer(void);
 
-    ThreadError RegisterNetworkData(uint16_t aRloc16, uint8_t *aTlvs, uint8_t aTlvsLength);
+    otError RegisterNetworkData(uint16_t aRloc16, uint8_t *aTlvs, uint8_t aTlvsLength);
 
-    ThreadError AddHasRoute(PrefixTlv &aPrefix, HasRouteTlv &aHasRoute);
-    ThreadError AddBorderRouter(PrefixTlv &aPrefix, BorderRouterTlv &aBorderRouter);
-    ThreadError AddNetworkData(uint8_t *aTlv, uint8_t aTlvLength);
-    ThreadError AddPrefix(PrefixTlv &aTlv);
+    otError AddHasRoute(PrefixTlv &aPrefix, HasRouteTlv &aHasRoute);
+    otError AddBorderRouter(PrefixTlv &aPrefix, BorderRouterTlv &aBorderRouter);
+    otError AddNetworkData(uint8_t *aTlvs, uint8_t aTlvsLength, uint8_t *aOldTlvs, uint8_t aOldTlvsLength);
+    otError AddPrefix(PrefixTlv &aPrefix);
+#if OPENTHREAD_ENABLE_SERVICE
+    otError AddServer(ServiceTlv &aService, ServerTlv &aServer, uint8_t *aOldTlvs, uint8_t aOldTlvsLength);
+    otError AddService(ServiceTlv &aService, uint8_t *aOldTlvs, uint8_t aOldTlvsLength);
+#endif
 
-    int AllocateContext(void);
-    ThreadError FreeContext(uint8_t aContextId);
+    int  AllocateContext(void);
+    void FreeContext(uint8_t aContextId);
+    void StartContextReuseTimer(uint8_t aContextId);
+    void StopContextReuseTimer(uint8_t aContextId);
 
-    ThreadError RemoveContext(uint8_t aContextId);
-    ThreadError RemoveContext(PrefixTlv &aPrefix, uint8_t aContextId);
+    void RemoveContext(uint8_t aContextId);
+    void RemoveContext(PrefixTlv &aPrefix, uint8_t aContextId);
 
-    ThreadError RemoveCommissioningData(void);
+    void RemoveCommissioningData(void);
 
-    ThreadError RemoveRloc(uint16_t aRloc16);
-    ThreadError RemoveRloc(PrefixTlv &aPrefix, uint16_t aRloc16);
-    ThreadError RemoveRloc(PrefixTlv &aPrefix, HasRouteTlv &aHasRoute, uint16_t aRloc16);
-    ThreadError RemoveRloc(PrefixTlv &aPrefix, BorderRouterTlv &aBorderRouter, uint16_t aRloc16);
+    void RemoveRloc(uint16_t aRloc16, MatchMode aMatchMode);
+    void RemoveRloc(PrefixTlv &aPrefix, uint16_t aRloc16, MatchMode aMatchMode);
+#if OPENTHREAD_ENABLE_SERVICE
+    void RemoveRloc(ServiceTlv &aService, uint16_t aRloc16, MatchMode aMatchMode);
+#endif
+    void RemoveRloc(PrefixTlv &aPrefix, HasRouteTlv &aHasRoute, uint16_t aRloc16, MatchMode aMatchMode);
+    void RemoveRloc(PrefixTlv &aPrefix, BorderRouterTlv &aBorderRouter, uint16_t aRloc16, MatchMode aMatchMode);
 
-    void RlocLookup(uint16_t aRloc16, bool &aIn, bool &aStable, uint8_t *aTlvs, uint8_t aTlvsLength);
-    bool IsStableUpdated(uint16_t aRloc16, uint8_t *aTlvs, uint8_t aTlvsLength, uint8_t *aTlvsBase,
-                         uint8_t aTlvsBaseLength);
+    static bool RlocMatch(uint16_t aFirstRloc16, uint16_t aSecondRloc16, MatchMode aMatchMode);
 
-    static void HandleCommissioningSet(void *aContext, otCoapHeader *aHeader, otMessage aMessage,
-                                       const otMessageInfo *aMessageInfo);
-    void HandleCommissioningSet(Coap::Header &aHeader, Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
+    otError RlocLookup(uint16_t  aRloc16,
+                       bool &    aIn,
+                       bool &    aStable,
+                       uint8_t * aTlvs,
+                       uint8_t   aTlvsLength,
+                       MatchMode aMatchMode,
+                       bool      aAllowOtherEntries = true);
 
-    static void HandleCommissioningGet(void *aContext, otCoapHeader *aHeader, otMessage aMessage,
-                                       const otMessageInfo *aMessageInfo);
-    void HandleCommissioningGet(Coap::Header &aHeader, Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
+    bool IsStableUpdated(uint8_t *aTlvs, uint8_t aTlvsLength, uint8_t *aTlvsBase, uint8_t aTlvsBaseLength);
 
-    void SendCommissioningGetResponse(const Coap::Header &aRequestHeader, const Ip6::MessageInfo &aMessageInfo,
-                                      uint8_t *aTlvs, uint8_t aLength);
-    void SendCommissioningSetResponse(const Coap::Header &aRequestHeader, const Ip6::MessageInfo &aMessageInfo,
+    static void HandleCommissioningSet(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
+    void        HandleCommissioningSet(Coap::Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
+
+    static void HandleCommissioningGet(void *aContext, otMessage *aMessage, const otMessageInfo *aMessageInfo);
+    void        HandleCommissioningGet(Coap::Message &aMessage, const Ip6::MessageInfo &aMessageInfo);
+
+    void SendCommissioningGetResponse(const Coap::Message &   aRequest,
+                                      const Ip6::MessageInfo &aMessageInfo,
+                                      const uint8_t *         aTlvs,
+                                      uint8_t                 aLength);
+    void SendCommissioningSetResponse(const Coap::Message &    aRequest,
+                                      const Ip6::MessageInfo & aMessageInfo,
                                       MeshCoP::StateTlv::State aState);
 
     /**
-     * Thread Specification Constants
+     * Thread Specification Constants.
      *
      */
     enum
     {
-        kMinContextId        = 1,             ///< Minimum Context ID (0 is used for Mesh Local)
-        kNumContextIds       = 15,            ///< Maximum Context ID
-        kContextIdReuseDelay = 48 * 60 * 60,  ///< CONTEXT_ID_REUSE_DELAY (seconds)
-        kStateUpdatePeriod   = 1000,          ///< State update period in milliseconds
+        kMinContextId        = 1,            ///< Minimum Context ID (0 is used for Mesh Local)
+        kNumContextIds       = 15,           ///< Maximum Context ID
+        kContextIdReuseDelay = 48 * 60 * 60, ///< CONTEXT_ID_REUSE_DELAY (seconds)
+        kStateUpdatePeriod   = 60 * 1000,    ///< State update period in milliseconds
     };
-    uint16_t mContextUsed;
-    uint32_t mContextLastUsed[kNumContextIds];
-    uint32_t mContextIdReuseDelay;
-    Timer mTimer;
 
-    Coap::Resource  mServerData;
+    uint16_t   mContextUsed;
+    uint32_t   mContextLastUsed[kNumContextIds];
+    uint32_t   mContextIdReuseDelay;
+    TimerMilli mTimer;
+
+    Coap::Resource mServerData;
 
     Coap::Resource mCommissioningDataGet;
     Coap::Resource mCommissioningDataSet;
-
-    Coap::Server   &mCoapServer;
 };
 
 /**
  * @}
  */
 
-}  // namespace NetworkData
-}  // namespace Thread
+} // namespace NetworkData
+} // namespace ot
 
-#endif  // NETWORK_DATA_LEADER_FTD_HPP_
+#endif // NETWORK_DATA_LEADER_FTD_HPP_
